@@ -25,6 +25,12 @@ const DEFAULT_OPTIONS: ClientOptions = { timeoutMs: 15_000, minIntervalMs: 1_500
 export class Freelas99Client implements HtmlFetcher {
   private readonly options: ClientOptions;
   private lastRequestAt = 0;
+  private requests = 0;
+
+  /** Number of HTTP requests attempted by this client so far. */
+  get requestCount(): number {
+    return this.requests;
+  }
 
   constructor(options: Partial<ClientOptions> = {}) {
     this.options = { ...DEFAULT_OPTIONS, ...options };
@@ -32,6 +38,7 @@ export class Freelas99Client implements HtmlFetcher {
 
   async fetchHtml(url: string): Promise<string> {
     await this.throttle();
+    this.requests += 1;
 
     let response: Response;
     try {

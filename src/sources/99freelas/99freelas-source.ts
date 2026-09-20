@@ -25,19 +25,41 @@ const SUMMARY_MAX_LENGTH = 280;
  */
 const PLACEHOLDER_SLUG = 'x';
 
+export interface StatusResolution {
+  status: Opportunity['status'];
+  evidence: string;
+}
+
 /**
- * Site status codes with direct evidence. Anything else stays "unknown" instead of guessed.
- *  - 2: the listing filters on { id: 2, name: "Aguardando propostas" }
- *  - 15: the same listing filter has { id: 15, name: "Aguardando aprovação e propostas" };
- *        a live page with this code showed "Enviar proposta" and already had proposals
- *  - 5: the page shows a "Cancelado" status button with class status-5
+ * Maps the site's status code to the domain status, only with direct evidence.
+ *  - 2: the listing filters on { id: 2, name: "Aguardando propostas" } -> open
+ *  - 5: the page shows a "Cancelado" status button with class status-5 -> cancelled
+ *  - 15: "Aguardando aprovação e propostas" alone is NOT enough; it is open only when the
+ *        page independently offers a real "Enviar proposta" action, otherwise unknown
  * No code has been observed for "closed" yet, so that value is never emitted.
  */
-const STATUS_BY_CODE: Record<string, Opportunity['status']> = {
-  '2': 'open',
-  '15': 'open',
-  '5': 'cancelled',
-};
+export function resolveStatus(
+  detail: Pick<ParsedDetail, 'statusCode' | 'statusLabel' | 'canSubmitProposal'>,
+): StatusResolution {
+  switch (detail.statusCode) {
+    case '2':
+      return { status: 'open', evidence: 'code 2 matches the site listing filter "Aguardando propostas"' };
+    case '5':
+      return {
+        status: 'cancelled',
+        evidence: `code 5 with status button text "${detail.statusLabel ?? ''}"`,
+      };
+    case '15':
+      return detail.canSubmitProposal
+        ? { status: 'open', evidence: 'code 15 plus a real "Enviar proposta" action on the page' }
+        : {
+            status: 'unknown',
+            evidence: 'code 15 without a "Enviar proposta" action: no independent evidence of open applications',
+          };
+    default:
+      return { status: 'unknown', evidence: `status code ${detail.statusCode} has no known mapping` };
+  }
+}
 
 export class Freelas99Source implements OpportunitySource {
   readonly id = SOURCE_ID;
@@ -105,6 +127,7 @@ export function toOpportunity(
   listed: { item: ListingItem; discoveredAt: string } | null,
   fetchedAt: string,
 ): Opportunity {
+  const resolution = resolveStatus(detail);
   return {
     sourceId,
     externalId,
@@ -122,11 +145,14 @@ export function toOpportunity(
     budget: toBudget(detail.budgetRaw),
     proposalCount: detail.proposalCount,
     interestedCount: detail.interestedCount,
-    status: STATUS_BY_CODE[detail.statusCode] ?? 'unknown',
+    status: resolution.status,
     fetchedAt,
     sourceMetadata: {
       statusCode: detail.statusCode,
       statusLabel: detail.statusLabel,
+      statusEvidence: resolution.evidence,
+      statusNormalized: resolution.status,
+      canSubmitProposal: detail.canSubmitProposal,
       visibility: detail.visibility,
       exclusive: detail.exclusive,
       budgetRaw: detail.budgetRaw,

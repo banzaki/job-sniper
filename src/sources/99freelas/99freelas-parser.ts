@@ -31,6 +31,8 @@ export interface ParsedDetail {
   skills: string[];
   statusCode: string;
   statusLabel: string | null;
+  /** True when the page offers a real "send proposal" action, independent of the status code. */
+  canSubmitProposal: boolean;
   exclusive: boolean;
 }
 
@@ -142,6 +144,10 @@ export function parseDetail(html: string): ParsedDetail {
     skills,
     statusCode,
     statusLabel: collapse($('button[class*="status-"]').first().text()) || null,
+    canSubmitProposal:
+      $('a[href^="/project/bid/"]')
+        .toArray()
+        .some((link) => /enviar proposta/i.test($(link).text())),
     exclusive: $('.box-project-view-principal .flags img[alt="Projeto exclusivo"]').length > 0,
   };
 }
