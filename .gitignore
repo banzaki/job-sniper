@@ -1,0 +1,21 @@
+node_modules/
+dist/
+
+# Secrets (keep the example file tracked)
+.env
+.env.*
+!.env.example
+
+# Local SQLite databases
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
+
+# Logs
+*.log
+logs/
