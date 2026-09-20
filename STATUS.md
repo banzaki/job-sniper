@@ -1,6 +1,6 @@
 # STATUS
 
-Last updated: 2026-09-20 (SPEC 003 — Telegram + end-to-end pipeline, CLOSED with live validation)
+Last updated: 2026-09-20 (SPEC 003.1 — adaptive pagination, APPROVED by the Tech Lead and committed)
 
 ## Implemented
 
@@ -22,7 +22,63 @@ Last updated: 2026-09-20 (SPEC 003 — Telegram + end-to-end pipeline, CLOSED wi
 - **Config**: `DRY_RUN` (default `true`; only an explicit `false` sends), `TELEGRAM_NOTIFY_DECISIONS`
   (default `shortlist,review`), `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` (required only when
   `DRY_RUN=false`; validated before any request is made). `.env.example` updated.
-- Not started: AI/LLM, dashboard, scheduler, application/proposal, second source, pagination, Playwright.
+- Not started: AI/LLM, dashboard, scheduler, application/proposal, second source, Playwright.
+
+## SPEC 003.1 — Adaptive pagination and discovery depth (approved)
+
+**RECON (live, 6 sequential requests):**
+- Page N is `/projects?order=mais-recentes&page=N`. Page 2 returns IDs completely different from page 1.
+  The site had 148 pages at the time (changes constantly). Page 148 returned 6 items and no "next" page.
+- `page=99999` → HTTP 200 with zero items and a "nenhum projeto" message (the end, not an error).
+- `page=0` → HTTP 200 with **page 1 content again** (repeated content, which the pipeline must detect).
+- `page=abc` → HTTP 404 (already handled by the client as an unexpected response).
+- Pages shift between requests (new items push older ones down), so partial overlap is normal.
+
+**Design:** one small generic contract change. `OpportunitySource.listRecent(cursor?)` returns
+`{ items, nextCursor }`; the cursor is an opaque string owned by the source (99Freelas: the page number).
+Nothing platform-specific reaches `Opportunity`. The 99Freelas adapter builds `&page=N`, validates the
+cursor (`^[1-9]\d{0,5}$`), derives "has next page" from the pagination control, and treats an empty page
+past page 1 as the end. The pipeline scans page by page, newest first:
+known/unseen split against SQLite per page → collect unseen → go deeper only while below the target.
+
+**Stop reasons** (`pagination stop` line of the run summary): `target-new-reached`, `max-pages-reached`,
+`source-exhausted` (no next page or empty page), `repeated-page` (a page with no ID new to this run),
+`no-progress` (cursor points back to a requested page), `blocked` (403/429/challenge: no further request
+of any kind, known items still marked as seen), `source-error` (collected items are still processed).
+
+**Configuration:** `DISCOVERY_MAX_PAGES=5`, `DISCOVERY_TARGET_NEW=10` (both positive integers; an invalid
+value fails the run with a `ConfigError` naming the variable). `MAX_DETAILS_PER_RUN` (existing) still caps
+detail requests; unseen items beyond it are "deferred" (not stored, found again next run).
+
+**Offline tests:** `npm test` (Node's built-in runner, no new dependency): 40 tests, all pass. Covers page 1
+fully known → page 2, target before page limit, empty page, repeated page, partial overlap, cursor without
+progress, page limit with nothing new, newest-first order and detail limit, deferred items, block on a deeper
+page (no detail requests), non-block error on a deeper page, notification deduplication and failed-delivery
+retry, adapter URL/cursor/empty-page/last-page behavior, and configuration validation. A mutation check
+(deduplication deliberately broken) made 5 tests fail, then it was reverted.
+
+**Live run (`npm run dev`, mode LIVE, defaults):**
+
+| Counter | Value |
+| --- | --- |
+| pages scanned | 3 |
+| summaries discovered | 30 |
+| already known | 16 |
+| unseen collected | 14 |
+| details requested | 10 |
+| deferred (limit) | 4 |
+| pagination stop | `target-new-reached` |
+| persisted | 10 (shortlist 2, review 1, skip 7) |
+| failures | 0 |
+| HTTP requests | 13 (3 listing pages + 10 details) |
+| notifications | pending 3, sent 3, failures 0 |
+| database rows | 17 → 27, all distinct |
+
+Details avoided: 16 (every known summary). The deferred 4 are the oldest of the 14 unseen (newest first
+was preserved). Database afterwards: 7 rows with `notified_at` in two batches (4 from the earlier live
+validation, unchanged, and 3 from this run), 0 pending, 0 rows notified twice. Page 1 already held
+new items (published after the previous validation), so scanning more than one page was needed only
+because the target of 10 had not been reached; page 3 was the first to reach it.
 
 ## Filter rules `basic-v2`, in order
 
@@ -105,6 +161,18 @@ This proves end to end: delivery, persistence, deduplication, and no duplicate T
 Run 1 sent 4 messages although only 2 items were new, which also confirms that stored opportunities
 from earlier runs are notified (not only those discovered in the current run).
 
+## Technical debt (accepted by the Tech Lead, non-blocking)
+
+1. **Deferred items are not persisted.** Unseen summaries beyond `MAX_DETAILS_PER_RUN` are only reported
+   as "deferred". They could leave the configured discovery window (`DISCOVERY_MAX_PAGES` newest pages)
+   before the next run and never be detailed. A **persistent discovery queue** should be considered
+   before any scheduled, autonomous operation.
+2. **Configuration is loaded globally.** An invalid `DISCOVERY_*` value also breaks commands that do not
+   discover anything (`npm run opportunities`, `npm run telegram:test`). Decouple it before or during
+   the scheduler milestone.
+3. **Deep historical backfill is bounded by design**: at most `DISCOVERY_MAX_PAGES` pages per run,
+   sequential and rate limited. There is no unbounded crawling.
+
 ## Known limitations
 
 - Delivery is at-least-once: if Telegram delivers but the reply is lost (timeout) or writing
@@ -116,13 +184,22 @@ from earlier runs are notified (not only those discovered in the current run).
   `review` can be noisy; that is the intended direction for doubt.
 - Changing the profile or rules requires bumping `FILTER_RULE_VERSION`, otherwise stored rows are not
   re-evaluated.
-- Only the first listing page is read; no `closed` status code observed; only "Aberto" budgets
-  interpreted; `node:sqlite` is experimental; no automated test suite in the repository.
+- Discovery reads at most `DISCOVERY_MAX_PAGES` (default 5) pages per run, so older opportunities are
+  reached progressively (backfill) and deep history is never guaranteed. A large value costs one
+  request per page plus one per detail, spaced ~1.5 s apart.
+- Deferred items are not stored: they are found again next run only while they remain within the pages
+  scanned; if newer items push them out of range they can be missed.
+- Pages shift while a run is in progress; overlap is deduplicated, but an item moving from a not yet
+  scanned page to an already scanned one can be missed until a later run.
+- No `closed` status code observed; only "Aberto" budgets interpreted; `node:sqlite` is experimental.
+- Offline tests cover discovery, adapter pagination and configuration; the filter, Telegram client and
+  message formatting were verified by ad hoc scripts (not in the repository).
 - Message labels are in English (project rule for UI text) although the SPEC sketched Portuguese ones.
 
 ## Blockers / risks
 
-- No blockers. SPEC 003 is closed.
+- No blockers. SPEC 003 is closed (commit `b0495bc`); SPEC 003.1 is approved and committed
+  (`feat: add adaptive opportunity discovery`).
 - `data/job-sniper.db` holds real data from the live site (git-ignored).
 - **Secret hygiene:** at closing time the working copy of `.env.example` (a tracked file) contained
   a bot token-like value. It was never committed (history and HEAD checked); the SPEC 003 commit
@@ -132,4 +209,4 @@ from earlier runs are notified (not only those discovered in the current run).
 
 ## Next authorized mission
 
-**SPEC 004 — AI + analysis + assisted proposal.** Not started.
+**SPEC 004 — AI + analysis + assisted proposal.** Not started; awaiting authorization.

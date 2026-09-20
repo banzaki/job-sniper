@@ -87,6 +87,19 @@ export function parseListing(html: string): ListingItem[] {
   return [...items.values()];
 }
 
+/**
+ * Highest page number offered by the listing's pagination control (the "last page" item),
+ * or null when the page has no pagination. The control is rendered twice (top and bottom).
+ */
+export function parseLastPage(html: string): number | null {
+  const $ = load(html);
+  const pages = $('.pagination-component .page-item')
+    .toArray()
+    .map((element) => Number($(element).attr('data-page')))
+    .filter((page) => Number.isInteger(page) && page >= 1);
+  return pages.length > 0 ? Math.max(...pages) : null;
+}
+
 export function parseDetail(html: string): ParsedDetail {
   const $ = load(html);
 

@@ -1,13 +1,10 @@
-import type {
-  Opportunity,
-  OpportunityBudget,
-  OpportunitySummary,
-} from '../../domain/opportunity.js';
-import type { OpportunitySource } from '../opportunity-source.js';
+import type { Opportunity, OpportunityBudget } from '../../domain/opportunity.js';
+import type { ListingPage, OpportunitySource } from '../opportunity-source.js';
 import { SourceResponseError } from '../source-errors.js';
 import { BASE_URL, Freelas99Client, type HtmlFetcher } from './99freelas-client.js';
 import {
   parseDetail,
+  parseLastPage,
   parseListing,
   parseProjectHref,
   type ListingItem,
@@ -72,18 +69,24 @@ export class Freelas99Source implements OpportunitySource {
     this.http = http;
   }
 
-  async listRecent(): Promise<OpportunitySummary[]> {
-    const html = await this.http.fetchHtml(LISTING_URL);
+  /** The cursor is the listing page number ("2", "3", ...); omit it for the newest page. */
+  async listRecent(cursor: string | null = null): Promise<ListingPage> {
+    const page = pageFromCursor(cursor);
+    const url = page === 1 ? LISTING_URL : `${LISTING_URL}&page=${page}`;
+    const html = await this.http.fetchHtml(url);
     const items = parseListing(html);
+
     if (items.length === 0) {
+      // Past the last page the site answers HTTP 200 with an empty list: that is the end, not an error.
+      if (page > 1) return { items: [], nextCursor: null };
       throw new SourceResponseError(
-        `No valid opportunities found in ${LISTING_URL}. The markup may have changed or access may be restricted.`,
+        `No valid opportunities found in ${url}. The markup may have changed or access may be restricted.`,
       );
     }
 
+    if (page === 1) this.listed.clear();
     const discoveredAt = new Date().toISOString();
-    this.listed.clear();
-    return items.map((item) => {
+    const summaries = items.map((item) => {
       this.listed.set(item.externalId, { item, discoveredAt });
       return {
         sourceId: this.id,
@@ -95,6 +98,12 @@ export class Freelas99Source implements OpportunitySource {
         discoveredAt,
       };
     });
+
+    const lastPage = parseLastPage(html);
+    return {
+      items: summaries,
+      nextCursor: lastPage !== null && page < lastPage ? String(page + 1) : null,
+    };
   }
 
   async fetchDetail(externalId: string): Promise<Opportunity> {
@@ -187,6 +196,14 @@ function describeDivergence(detail: ParsedDetail, item: ListingItem | null): str
     differences.push(`interested: listing=${item.interestedCount} detail=${detail.interestedCount}`);
   }
   return differences.length > 0 ? differences.join('; ') : null;
+}
+
+function pageFromCursor(cursor: string | null): number {
+  if (cursor === null) return 1;
+  if (!/^[1-9]\d{0,5}$/.test(cursor)) {
+    throw new Error(`Invalid ${SOURCE_ID} cursor: "${cursor}"`);
+  }
+  return Number(cursor);
 }
 
 function truncate(text: string, maxLength: number): string {

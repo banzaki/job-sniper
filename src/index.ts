@@ -39,10 +39,12 @@ async function main(): Promise<number> {
         store,
         profile: donBrunoProfile,
         maxDetailsPerRun: config.maxDetailsPerRun,
+        maxPages: config.discoveryMaxPages,
+        targetNew: config.discoveryTargetNew,
       });
       printReport(report, client.requestCount, store.count());
       if (report.aborted) exitCode = 2;
-      else if (report.failures.length > 0) exitCode = 1;
+      else if (report.failures.length > 0 || report.stopReason === 'source-error') exitCode = 1;
     } catch (error) {
       const blocked = error instanceof SourceBlockedError;
       console.error(
@@ -81,11 +83,13 @@ function printNotifyReport(report: NotifyReport, decisions: string, dryRun: bool
 
 function printReport(report: PipelineReport, requests: number, rowsAfter: number): void {
   console.log('');
-  console.log(`listed              : ${report.listed}`);
+  console.log(`pages scanned       : ${report.pagesScanned}`);
+  console.log(`summaries discovered: ${report.discovered}`);
   console.log(`already known       : ${report.alreadyKnown}`);
-  console.log(`new                 : ${report.newFound}`);
-  console.log(`deferred (limit)    : ${report.deferred}`);
+  console.log(`unseen collected    : ${report.unseenCollected}`);
   console.log(`details requested   : ${report.detailsRequested}`);
+  console.log(`deferred (limit)    : ${report.deferred}`);
+  console.log(`pagination stop     : ${report.stopReason}${report.stopDetail ? ` (${report.stopDetail})` : ''}`);
   console.log(`persisted           : ${report.persisted}`);
   console.log(
     `decisions           : shortlist=${report.decisions.shortlist} review=${report.decisions.review} skip=${report.decisions.skip}`,

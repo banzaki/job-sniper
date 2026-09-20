@@ -4,6 +4,10 @@ import type { FilterDecision } from './domain/filter-result.js';
 export interface AppConfig {
   databasePath: string;
   maxDetailsPerRun: number;
+  /** Most listing pages read per run, starting from the newest. */
+  discoveryMaxPages: number;
+  /** Stop paginating once this many unseen opportunities were collected. */
+  discoveryTargetNew: number;
   /** When true nothing is sent anywhere and nothing is marked as notified. Defaults to true. */
   dryRun: boolean;
   notifyDecisions: FilterDecision[];
@@ -13,6 +17,8 @@ export interface AppConfig {
 
 export const DEFAULT_DATABASE_PATH = './data/job-sniper.db';
 export const DEFAULT_MAX_DETAILS_PER_RUN = 10;
+export const DEFAULT_DISCOVERY_MAX_PAGES = 5;
+export const DEFAULT_DISCOVERY_TARGET_NEW = 10;
 export const DEFAULT_NOTIFY_DECISIONS: readonly FilterDecision[] = ['shortlist', 'review'];
 
 const DECISIONS: readonly FilterDecision[] = ['shortlist', 'review', 'skip'];
@@ -49,6 +55,9 @@ export function loadConfig(
     }
   }
 
+  const discoveryMaxPages = positiveInteger(env, 'DISCOVERY_MAX_PAGES', DEFAULT_DISCOVERY_MAX_PAGES);
+  const discoveryTargetNew = positiveInteger(env, 'DISCOVERY_TARGET_NEW', DEFAULT_DISCOVERY_TARGET_NEW);
+
   // Anything other than an explicit "false" keeps dry-run on: the safe direction.
   let dryRun = true;
   const rawDryRun = env.DRY_RUN?.trim().toLowerCase();
@@ -61,6 +70,8 @@ export function loadConfig(
   return {
     databasePath,
     maxDetailsPerRun,
+    discoveryMaxPages,
+    discoveryTargetNew,
     dryRun,
     notifyDecisions: parseDecisions(env.TELEGRAM_NOTIFY_DECISIONS, warn),
     telegramBotToken: env.TELEGRAM_BOT_TOKEN?.trim() || null,
@@ -79,6 +90,16 @@ export function requireTelegramCredentials(config: AppConfig): { botToken: strin
     );
   }
   return { botToken: config.telegramBotToken, chatId: config.telegramChatId };
+}
+
+/** Unset or blank gives the default; anything else must be a positive integer, or the run fails. */
+function positiveInteger(env: NodeJS.ProcessEnv, name: string, fallback: number): number {
+  const raw = env[name]?.trim();
+  if (!raw) return fallback;
+  if (!/^[1-9]\d*$/.test(raw) || !Number.isSafeInteger(Number(raw))) {
+    throw new ConfigError(`${name} must be a positive integer, but got "${raw}".`);
+  }
+  return Number(raw);
 }
 
 function parseDecisions(
