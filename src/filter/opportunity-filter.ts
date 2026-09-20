@@ -1,18 +1,36 @@
 import type { FilterResult } from '../domain/filter-result.js';
 import type { Opportunity } from '../domain/opportunity.js';
-import type { InterestProfile } from '../profile/interest-profile.js';
+import type { InterestProfile, KeywordRule } from '../profile/interest-profile.js';
 
-export const FILTER_RULE_VERSION = 'basic-v1';
+export const FILTER_RULE_VERSION = 'basic-v2';
+
+interface CategoryInfo {
+  direct: string | null;
+  broad: string | null;
+  excluded: string | null;
+  /** A specific category on none of the lists. */
+  other: string | null;
+  /** Missing, or a label like "Other" that says nothing about the work. */
+  vague: boolean;
+}
 
 /**
- * Deterministic, explainable filter. Order of rules:
- *  1. cancelled / closed                      -> skip
- *  2. relevant category OR interest keywords:
- *       status open                           -> shortlist
- *       status unknown                        -> review
- *  3. no positive signal:
- *       known, specific, irrelevant category  -> skip
- *       category missing or non-specific      -> review (doubt favors review)
+ * Deterministic, explainable filter. Signals come from the text (title, description, skills):
+ * strong (proves fit), weak (generic words) and conflicting (advanced or unrelated scope).
+ *
+ *  0. cancelled / closed -> skip
+ *  1. At least one strong signal:
+ *       any conflicting signal, excluded category or unconfirmed status -> review
+ *       otherwise                                                        -> shortlist
+ *  2. No strong signal:
+ *       excluded category                                          -> skip
+ *       directly relevant category:
+ *         >= 2 weak signals, no conflict, status open              -> shortlist
+ *         otherwise                                                -> review
+ *       weak or conflicting signals, or a broad category           -> review
+ *       missing / vague category                                   -> review (doubt favors review)
+ *       anything else                                              -> skip
+ * A weak signal alone never produces a shortlist.
  */
 export function evaluateOpportunity(
   opportunity: Opportunity,
@@ -20,72 +38,113 @@ export function evaluateOpportunity(
   now: Date = new Date(),
 ): FilterResult {
   const meta = { evaluatedAt: now.toISOString(), ruleVersion: FILTER_RULE_VERSION };
+  const result = (
+    decision: FilterResult['decision'],
+    reasons: string[],
+    matchedKeywords: string[] = [],
+  ): FilterResult => ({ ...meta, decision, reasons, matchedKeywords });
 
   if (opportunity.status === 'cancelled' || opportunity.status === 'closed') {
-    return { ...meta, decision: 'skip', reasons: [`status is ${opportunity.status}`], matchedKeywords: [] };
+    return result('skip', [`status is ${opportunity.status}`]);
   }
 
-  const matchedKeywords = findKeywords(opportunity, profile);
-  const relevantCategory = findRelevantCategory(opportunity, profile);
-  const reasons: string[] = [];
-  if (matchedKeywords.length > 0) {
-    reasons.push(`matched interest terms: ${matchedKeywords.join(', ')}`);
-  }
-  if (relevantCategory) {
-    reasons.push(`category "${relevantCategory}" is on the interest list`);
-  }
+  const text = pad(normalize([opportunity.title, opportunity.description, ...opportunity.skills].join('\n')));
+  const strong = findTerms(text, profile.strongSignals);
+  const weak = findTerms(text, profile.weakSignals);
+  const conflicts = findTerms(text, profile.conflictSignals);
+  const category = classifyCategory(opportunity, profile);
+  const matched = [...strong, ...weak];
+  const open = opportunity.status === 'open';
 
-  if (reasons.length > 0) {
-    if (opportunity.status === 'open') {
-      return { ...meta, decision: 'shortlist', reasons, matchedKeywords };
-    }
-    reasons.push('status could not be confirmed as open, so it needs manual review');
-    return { ...meta, decision: 'review', reasons, matchedKeywords };
-  }
-
-  const category = opportunity.subcategory ?? opportunity.category;
-  const specificCategories = [opportunity.category, opportunity.subcategory].filter(
-    (value): value is string => value !== null && !isNonSpecific(value, profile),
-  );
-  if (specificCategories.length > 0) {
-    return {
-      ...meta,
-      decision: 'skip',
-      reasons: [
-        `category "${specificCategories.join(' / ')}" is not on the interest list and no interest terms were found`,
-      ],
-      matchedKeywords: [],
-    };
-  }
-  return {
-    ...meta,
-    decision: 'review',
-    reasons: [
-      `no interest terms found, but the category is ${category ? `non-specific ("${category}")` : 'missing'}`,
-    ],
-    matchedKeywords: [],
+  const notes = {
+    strong: strong.length > 0 ? `strong signals: ${strong.join(', ')}` : null,
+    weak: weak.length > 0 ? `weak signals: ${weak.join(', ')}` : null,
+    conflicts: conflicts.length > 0 ? `conflicting or advanced scope: ${conflicts.join(', ')}` : null,
+    unconfirmed: open ? null : 'status could not be confirmed as open',
+    direct: category.direct ? `category "${category.direct}" is directly relevant` : null,
   };
+  const compact = (items: (string | null)[]): string[] => items.filter((item): item is string => item !== null);
+
+  if (strong.length > 0) {
+    const problems = compact([
+      notes.conflicts,
+      category.excluded ? `category "${category.excluded}" is outside the profile` : null,
+      notes.unconfirmed,
+    ]);
+    const reasons = compact([notes.strong, notes.direct, notes.weak, ...problems]);
+    return problems.length > 0 ? result('review', reasons, matched) : result('shortlist', reasons, matched);
+  }
+
+  if (category.excluded) {
+    return result('skip', [
+      `category "${category.excluded}" is outside the profile and there are no strong signals`,
+    ]);
+  }
+
+  if (category.direct) {
+    const reasons = compact([notes.direct, notes.weak, notes.conflicts, notes.unconfirmed]);
+    if (weak.length >= 2 && conflicts.length === 0 && open) {
+      return result('shortlist', [...reasons, 'several compatible weak signals support the category'], matched);
+    }
+    return result('review', [...reasons, 'no strong technical signal'], matched);
+  }
+
+  if (weak.length > 0 || conflicts.length > 0 || category.broad) {
+    const reasons = compact([
+      weak.length > 0 && conflicts.length === 0 ? `only weak signals (${weak.join(', ')}), not enough on their own` : notes.weak,
+      notes.conflicts,
+      category.broad ? `broad category "${category.broad}" without a strong skill` : null,
+      notes.unconfirmed,
+    ]);
+    return result('review', reasons, matched);
+  }
+
+  if (category.vague) {
+    const label = opportunity.category ?? opportunity.subcategory;
+    return result('review', [
+      `no interest signals, but the category is ${label ? `non-specific ("${label}")` : 'missing'}`,
+    ]);
+  }
+
+  return result('skip', [
+    `category "${category.other}" is not on the interest list and no interest signals were found`,
+  ]);
 }
 
-function findKeywords(opportunity: Opportunity, profile: InterestProfile): string[] {
-  const text = pad(normalize([opportunity.title, opportunity.description, ...opportunity.skills].join('\n')));
-  return profile.keywords
-    .filter((rule) =>
-      [rule.term, ...(rule.aliases ?? [])].some((spelling) => text.includes(pad(normalize(spelling)))),
-    )
+function findTerms(paddedText: string, rules: readonly KeywordRule[]): string[] {
+  return rules
+    .filter((rule) => {
+      let text = paddedText;
+      for (const phrase of rule.except ?? []) {
+        text = text.split(pad(normalize(phrase))).join(' ');
+      }
+      return [rule.term, ...(rule.aliases ?? [])].some((spelling) => text.includes(pad(normalize(spelling))));
+    })
     .map((rule) => rule.term);
 }
 
-function findRelevantCategory(opportunity: Opportunity, profile: InterestProfile): string | null {
-  const relevant = new Set(profile.relevantCategories.map(normalize));
-  for (const candidate of [opportunity.category, opportunity.subcategory]) {
-    if (candidate !== null && relevant.has(normalize(candidate))) return candidate;
-  }
-  return null;
-}
+function classifyCategory(opportunity: Opportunity, profile: InterestProfile): CategoryInfo {
+  const labels = [opportunity.subcategory, opportunity.category].filter(
+    (value): value is string => value !== null,
+  );
+  const within = (list: readonly string[]): string | null => {
+    const normalized = new Set(list.map(normalize));
+    return labels.find((label) => normalized.has(normalize(label))) ?? null;
+  };
 
-function isNonSpecific(category: string, profile: InterestProfile): boolean {
-  return profile.nonSpecificCategories.map(normalize).includes(normalize(category));
+  const direct = within(profile.directCategories);
+  const broad = within(profile.broadCategories);
+  const excluded = direct || broad ? null : within(profile.excludedCategories);
+  const vagueLabels = new Set(profile.nonSpecificCategories.map(normalize));
+  const specific = labels.filter((label) => !vagueLabels.has(normalize(label)));
+
+  return {
+    direct,
+    broad,
+    excluded,
+    other: direct || broad || excluded ? null : (specific.join(' / ') || null),
+    vague: specific.length === 0,
+  };
 }
 
 /** Lowercase, accent-free, punctuation-free ("&" reads as "e"), single-spaced. */

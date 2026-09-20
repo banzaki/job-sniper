@@ -1,5 +1,8 @@
-import { config as loadDotenv } from 'dotenv';
-import { loadConfig } from './config.js';
+import { loadAppConfig } from './config.js';
+import { FILTER_RULE_VERSION } from './filter/opportunity-filter.js';
+import { createNotifier } from './notify/create-notifier.js';
+import { notifyPending, type NotifyReport } from './notify/notify-pending.js';
+import { reevaluateOutdated } from './pipeline/reevaluate.js';
 import { runPipeline, type PipelineReport, type ProcessedOpportunity } from './pipeline/run-pipeline.js';
 import { donBrunoProfile } from './profile/don-bruno.js';
 import { Freelas99Client } from './sources/99freelas/99freelas-client.js';
@@ -7,26 +10,72 @@ import { Freelas99Source } from './sources/99freelas/99freelas-source.js';
 import { SourceBlockedError } from './sources/source-errors.js';
 import { OpportunityStore } from './storage/opportunity-store.js';
 
+const SOURCE_LABELS = { '99freelas': '99Freelas' };
+
 async function main(): Promise<number> {
-  loadDotenv({ quiet: true });
-  const config = loadConfig();
+  const config = loadAppConfig();
+  // Validates Telegram credentials (when DRY_RUN=false) before any request is made.
+  const notifier = createNotifier(config);
 
   const client = new Freelas99Client();
   const source = new Freelas99Source(client);
   const store = new OpportunityStore(config.databasePath);
+  let exitCode = 0;
 
   try {
-    console.log(`database: ${config.databasePath} (${store.count()} rows before this run)`);
-    const report = await runPipeline({
-      source,
+    console.log(
+      `database: ${config.databasePath} (${store.count()} rows before this run) | ` +
+        (config.dryRun ? 'mode: DRY_RUN (nothing is sent or marked as notified)' : 'mode: LIVE (Telegram)'),
+    );
+
+    const reevaluation = reevaluateOutdated(store, donBrunoProfile);
+    console.log(`re-evaluated stored opportunities to ${FILTER_RULE_VERSION}: ${reevaluation.reevaluated}`);
+    if (reevaluation.failures.length > 0) exitCode = 1;
+
+    // A collection problem must not stop notifications for what is already stored.
+    try {
+      const report = await runPipeline({
+        source,
+        store,
+        profile: donBrunoProfile,
+        maxDetailsPerRun: config.maxDetailsPerRun,
+      });
+      printReport(report, client.requestCount, store.count());
+      if (report.aborted) exitCode = 2;
+      else if (report.failures.length > 0) exitCode = 1;
+    } catch (error) {
+      const blocked = error instanceof SourceBlockedError;
+      console.error(
+        blocked
+          ? `Blocked by the source, stopping collection without retry: ${error.message}`
+          : `Collection failed: ${error instanceof Error ? error.message : error}`,
+      );
+      exitCode = blocked ? 2 : 1;
+    }
+
+    const notification = await notifyPending({
       store,
-      profile: donBrunoProfile,
-      maxDetailsPerRun: config.maxDetailsPerRun,
+      notifier,
+      decisions: config.notifyDecisions,
+      dryRun: config.dryRun,
+      format: { sourceLabels: SOURCE_LABELS },
     });
-    printReport(report, client.requestCount, store.count());
-    return report.aborted ? 2 : report.failures.length > 0 ? 1 : 0;
+    printNotifyReport(notification, config.notifyDecisions.join(','), config.dryRun);
+    if (notification.failures.length > 0) exitCode = Math.max(exitCode, 1);
+    return exitCode;
   } finally {
     store.close();
+  }
+}
+
+function printNotifyReport(report: NotifyReport, decisions: string, dryRun: boolean): void {
+  console.log('');
+  console.log(`notifications (${decisions}): pending=${report.pending} ${dryRun ? `rendered=${report.rendered} (dry-run, none sent, none marked)` : `sent=${report.sent}`} failures=${report.failures.length}`);
+  for (const failure of report.failures) {
+    console.error(`  not notified ${failure.id}: ${failure.message}`);
+  }
+  if (report.aborted) {
+    console.error('  Notification stopped early; remaining items stay pending for the next run.');
   }
 }
 
@@ -83,11 +132,6 @@ main().then(
     process.exitCode = code;
   },
   (error: unknown) => {
-    if (error instanceof SourceBlockedError) {
-      console.error(`Blocked by the source, stopping without retry: ${error.message}`);
-      process.exitCode = 2;
-      return;
-    }
     console.error(error instanceof Error ? error.message : error);
     process.exitCode = 1;
   },

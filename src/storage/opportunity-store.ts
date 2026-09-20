@@ -51,6 +51,8 @@ export class OpportunityStore {
   private readonly insertStatement: StatementSync;
   private readonly getStatement: StatementSync;
   private readonly countStatement: StatementSync;
+  private readonly updateFilterStatement: StatementSync;
+  private readonly markNotifiedStatement: StatementSync;
 
   /** Opens (creating the folder and file when missing) the database at `path`. */
   constructor(path: string) {
@@ -77,6 +79,14 @@ export class OpportunityStore {
         'SELECT * FROM opportunities WHERE source_id = ? AND external_id = ?',
       );
       this.countStatement = this.db.prepare('SELECT COUNT(*) AS total FROM opportunities');
+      this.updateFilterStatement = this.db.prepare(`
+        UPDATE opportunities SET
+          filter_decision = ?, filter_reasons_json = ?, filter_keywords_json = ?,
+          filter_evaluated_at = ?, filter_rule_version = ?
+        WHERE source_id = ? AND external_id = ?`);
+      this.markNotifiedStatement = this.db.prepare(
+        'UPDATE opportunities SET notified_at = ? WHERE source_id = ? AND external_id = ? AND notified_at IS NULL',
+      );
     } catch (error) {
       this.db.close();
       throw error;
@@ -144,6 +154,58 @@ export class OpportunityStore {
     };
   }
 
+  /** Every stored key, oldest first. Callers read each row with get() so one bad row is isolated. */
+  listKeys(): OpportunityKey[] {
+    return this.readKeys('SELECT source_id, external_id FROM opportunities ORDER BY first_seen_at, id');
+  }
+
+  /** Keys whose filter result was produced by a different rule version. */
+  listKeysNotEvaluatedWith(ruleVersion: string): OpportunityKey[] {
+    return this.readKeys(
+      'SELECT source_id, external_id FROM opportunities WHERE filter_rule_version <> ? ORDER BY first_seen_at, id',
+      ruleVersion,
+    );
+  }
+
+  /** Keys with one of the given decisions that were never notified, oldest first. */
+  listPendingNotification(decisions: readonly FilterResult['decision'][]): OpportunityKey[] {
+    if (decisions.length === 0) return [];
+    // Only "?" placeholders are generated; the decision values are bound as parameters.
+    const placeholders = decisions.map(() => '?').join(', ');
+    return this.readKeys(
+      `SELECT source_id, external_id FROM opportunities
+       WHERE notified_at IS NULL AND filter_decision IN (${placeholders})
+       ORDER BY first_seen_at, id`,
+      ...decisions,
+    );
+  }
+
+  /**
+   * Replaces the filter result of stored opportunities. Touches nothing else:
+   * first_seen_at, last_seen_at and notified_at stay as they are.
+   */
+  updateFilters(updates: readonly { key: OpportunityKey; filter: FilterResult }[]): void {
+    this.transaction(() => {
+      for (const { key, filter } of updates) {
+        this.updateFilterStatement.run(
+          filter.decision,
+          JSON.stringify(filter.reasons),
+          JSON.stringify(filter.matchedKeywords),
+          filter.evaluatedAt,
+          filter.ruleVersion,
+          key.sourceId,
+          key.externalId,
+        );
+      }
+    });
+  }
+
+  /** Marks an opportunity as notified. Returns false when it was missing or already notified. */
+  markNotified(key: OpportunityKey, notifiedAt: string): boolean {
+    const result = this.markNotifiedStatement.run(notifiedAt, key.sourceId, key.externalId);
+    return Number(result.changes) === 1;
+  }
+
   count(): number {
     const row = this.countStatement.get();
     const total = row?.total;
@@ -151,6 +213,13 @@ export class OpportunityStore {
       throw new StoreDataError('Could not count stored opportunities.');
     }
     return total;
+  }
+
+  private readKeys(sql: string, ...params: string[]): OpportunityKey[] {
+    return this.db.prepare(sql).all(...params).map((row) => ({
+      sourceId: column(row, 'source_id', '(list)'),
+      externalId: column(row, 'external_id', '(list)'),
+    }));
   }
 
   private migrate(): void {

@@ -8,7 +8,9 @@
     "dev": "tsx src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "opportunities": "tsx src/cli/opportunities.ts",
+    "telegram:test": "tsx src/cli/telegram-test.ts"
   },
   "keywords": [],
   "author": "",
