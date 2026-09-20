@@ -17,7 +17,8 @@ a common contract, so the core never depends on a specific website.
 4. **Filter** — keep only opportunities matching the configured criteria.
 5. **Notify** — send matches to Telegram (with a dry-run mode).
 
-> The steps will be built one SPEC at a time. None of them is implemented yet.
+> The steps are built one SPEC at a time. Only steps 1 and 3 exist so far, for a single
+> source, and they end in the terminal (no database, filter or notifications yet).
 
 ## Stack
 
@@ -49,9 +50,11 @@ cp .env.example .env   # then fill in your own values; never commit .env
 
 ```
 src/
-  index.ts                     Minimal entrypoint (placeholder)
-  domain/opportunity.ts        Platform-independent Opportunity model
+  index.ts                       Lists recent opportunities and prints up to 3 details
+  domain/opportunity.ts          Platform-independent Opportunity model
   sources/opportunity-source.ts  OpportunitySource contract
+  sources/source-errors.ts       Blocked / unusable-response errors
+  sources/99freelas/             First adapter: client (transport), parser (HTML), source
 .env.example                   Configuration template (no secrets)
 STATUS.md                      Current project state
 CLAUDE.md                      Working rules for the implementation agent
