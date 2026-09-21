@@ -9,17 +9,15 @@ export const VERY_CROWDED_PROPOSALS = 150;
 const HIGH_PRIORITY_PROPOSALS = 20;
 
 /**
- * How crowded a project already is:
+ * How crowded a project already is (from the proposals the source publishes; unknown is "normal"):
  *   0 high          up to 20 proposals
  *   1 normal        21 to 60
  *   2 reduced       61 to 150
  *   3 very crowded  more than 150 (relevant, but last in its own group)
- * Only a source that publishes engagement types and proposal counts (a projects marketplace) has one; every other
- * opportunity is "normal".
  */
 export function competitionTier(opportunity: Opportunity): 0 | 1 | 2 | 3 {
   const proposals = opportunity.proposalCount;
-  if (opportunity.employmentType === undefined || proposals === null) return 1;
+  if (proposals === null) return 1;
   if (proposals <= HIGH_PRIORITY_PROPOSALS) return 0;
   if (proposals <= CROWDED_PROPOSALS) return 1;
   if (proposals <= VERY_CROWDED_PROPOSALS) return 2;

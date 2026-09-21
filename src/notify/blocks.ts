@@ -59,7 +59,7 @@ export function basicAttention(opportunity: Opportunity, filter: FilterResult, n
   // A low budget is the main worry when it is the first caveat: it says what to weigh, not that the project is bad.
   if (caveat !== null && BELOW_FLOOR.test(caveat)) return LOW_BUDGET_TEXT;
   // Crowding is a warning only when nothing more relevant (a real doubt, a low budget) came first.
-  if ((caveat === null || CROWDED.test(caveat)) && opportunity.proposalCount !== null && opportunity.employmentType !== undefined) {
+  if ((caveat === null || CROWDED.test(caveat)) && opportunity.proposalCount !== null) {
     const tier = competitionTier(opportunity);
     if (tier === 3) return `Concorrência muito alta: ${opportunity.proposalCount} propostas já enviadas.`;
     if (tier === 2) return `Concorrência alta: ${opportunity.proposalCount} propostas já enviadas.`;

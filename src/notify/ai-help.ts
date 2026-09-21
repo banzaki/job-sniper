@@ -48,5 +48,5 @@ export function aiHelpFor(opportunity: Pick<Opportunity, 'title' | 'description'
 
 /** Only work with no advanced scope, and whose skills are really named in the text, is safe to describe. */
 export function isSafeForAiHelp(decision: FilterDecision, reasons: readonly string[]): boolean {
-  return decision !== 'skip' && !reasons.some((reason) => reason.startsWith('conflicting or advanced scope') || reason.startsWith('strong skills appear only as tags') || reason.startsWith('title names non-technical') || reason.startsWith('technical deliverable is not clear') || reason.startsWith('essential skill outside the profile'));
+  return decision !== 'skip' && !reasons.some((reason) => reason.startsWith('conflicting or advanced scope') || reason.startsWith('strong skills appear only as tags') || reason.startsWith('title names non-technical') || reason.startsWith('technical deliverable is not clear') || reason.startsWith('essential skill outside the profile') || reason.startsWith('back-end work beside') || reason.startsWith('no specific technical skill') || /^category ".*" is not technology, but/.test(reason) || reason.startsWith('project language uncertain'));
 }

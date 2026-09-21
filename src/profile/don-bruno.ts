@@ -173,13 +173,40 @@ export const donBrunoProfile: InterestProfile = {
     { term: 'machine learning', aliases: ['deep learning', 'data science', 'data scientist', 'computer vision', 'neural network'] },
     { term: 'devops', aliases: ['kubernetes', 'k8s', 'terraform', 'ci cd', 'docker swarm'] },
     { term: 'blockchain', aliases: ['web3', 'smart contract', 'smart contracts', 'solidity', 'nft'] },
-    { term: 'embedded', aliases: ['firmware', 'arduino', 'raspberry pi'] },
+    { term: 'embedded systems', aliases: ['firmware', 'arduino', 'raspberry pi', 'microcontroller'] },
     { term: 'voip', aliases: ['pabx', 'asterisk', 'telefonia'] },
+    // Site platforms are judged by the skills configured here, not by a global block: add a platform to `strongSignals` and it
+    // stops being outside the profile (an unavailable term that is also a configured skill is ignored).
+    { term: 'shopify' },
+    { term: 'webflow' },
+    { term: 'wix' },
+    { term: 'squarespace' },
+    { term: 'magento', aliases: ['prestashop', 'opencart'] },
   ],
 
   offTopicUnlessStrong: [
     { term: 'meta ads', aliases: ['facebook ads', 'instagram ads', 'google ads', 'tiktok ads', 'social media ads', 'ads campaign', 'ad campaigns', 'ad account', 'ad accounts', 'paid acquisition', 'paid social', 'ppc', 'media buying', 'seo', 'search engine optimization'] },
   ],
+
+  // Words that alone do not prove fit: a green needs a specific skill (the other terms) in the title or the start of the description.
+  genericSignalTerms: ['responsividade', 'front-end', 'site', 'web', 'sistema', 'desenvolvimento web'],
+
+  // Back-end work: the profile offers front-end, simple WordPress sites, simple APIs and small automations only.
+  backendWork: {
+    strong: [
+      { term: 'back end', aliases: ['backend', 'back-end', 'full stack', 'fullstack', 'server side'] },
+      { term: 'laravel', aliases: ['symfony', 'codeigniter', 'cakephp', 'yii', 'filament', 'spring boot', 'nestjs', 'nest js'] },
+      { term: 'node js', aliases: ['nodejs', 'express js', 'expressjs'] },
+      { term: 'scraping', aliases: ['scraper', 'scrapers', 'web scraping', 'crawler', 'headless browser', 'headless', 'puppeteer', 'playwright', 'selenium'] },
+      { term: 'websocket', aliases: ['websockets', 'real time data', 'live data feed'] },
+      { term: 'multi tenant', aliases: ['multitenant', 'saas', 'microservices', 'microsservicos'] },
+    ],
+    weak: [
+      { term: 'database', aliases: ['databases', 'database design', 'sql', 'mysql', 'postgres', 'mongodb', 'banco de dados'] },
+      { term: 'authentication', aliases: ['sign up', 'signup', 'log in', 'login', 'user accounts', 'user profiles', 'autenticacao', 'cadastro de usuarios', 'login de usuarios'] },
+      { term: 'file uploads', aliases: ['upload photos', 'upload files', 'admin panel', 'painel administrativo', 'role based'] },
+    ],
+  },
 
   largeScopeSignals: [
     { term: 'enterprise', aliases: ['marketplace', 'saas', 'erp', 'crm', 'multi vendor', 'multi tenant', 'microservices', 'social network', 'learning management system', 'lms'] },

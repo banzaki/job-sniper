@@ -11,6 +11,7 @@ import { notifyPending } from './notify/notify-pending.js';
 import { SOURCE_LABELS } from './notify/source-labels.js';
 import { SOURCE_DATA_MAX_AGE_HOURS } from './sources/create-sources.js';
 import { collectSources } from './pipeline/collect-sources.js';
+import { describeAlertBatch, selectAlertBatch, type AlertBatchReport } from './pipeline/select-alert-batch.js';
 import { reevaluateOutdated } from './pipeline/reevaluate.js';
 import { brunoCandidate } from './profile/bruno-candidate.js';
 import { donBrunoProfile } from './profile/don-bruno.js';
@@ -25,6 +26,8 @@ const reason = (error: unknown): string => (error instanceof Error ? error.messa
  * prevents the next stage from running on what is already stored.
  */
 async function main(): Promise<number> {
+  // The collection is identified by the instant the run starts: what it stores for the first time competes for THIS run's alerts.
+  const runStartedAt = new Date().toISOString();
   const config = loadAppConfig();
   // Validates Telegram credentials (when DRY_RUN=false) before any request is made.
   const notifier = createNotifier(config);
@@ -59,6 +62,16 @@ async function main(): Promise<number> {
       exitCode = Math.max(exitCode, 1);
     }
 
+    // ---- the alert batch of this collection: persisted before anything is sent ----
+    let batch: AlertBatchReport | null = null;
+    try {
+      batch = selectAlertBatch(store, { batchId: runStartedAt, decisions: config.notifyDecisions, cap: config.maxTelegramAlertsPerRun, maxAgeHoursBySource: SOURCE_DATA_MAX_AGE_HOURS, now: new Date() });
+      for (const line of describeAlertBatch(batch)) console.log(line);
+    } catch (error) {
+      console.error(`Alert batch selection failed (nothing new will be alerted in this run): ${reason(error)}`);
+      exitCode = Math.max(exitCode, 1);
+    }
+
     // ---- stage 2: AI analysis (its failure or quota never blocks stage 3) ----
     console.log('\n== ai ==');
     try {
@@ -90,6 +103,8 @@ async function main(): Promise<number> {
         format: { sourceLabels: SOURCE_LABELS },
         maxAgeHoursBySource: SOURCE_DATA_MAX_AGE_HOURS,
         maxAlerts: config.maxTelegramAlertsPerRun,
+        // Only the batch may receive a first notification. The old backlog is delivered on purpose, by "npm run backlog".
+        alertKeys: batch?.alertKeys ?? [],
       });
       printNotifyReport(notification, config.notifyDecisions.join(','), config.dryRun);
       if (notification.failures.length > 0) exitCode = Math.max(exitCode, 1);

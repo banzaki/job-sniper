@@ -60,7 +60,8 @@ test('the crowding tier: up to 20, 21-60, 61-150 and more than 150; recency come
   const tiers = (n: number) => competitionTier(make({ id: 'x', sourceId: 'freelancer', proposals: n }).opportunity);
   assert.deepEqual([0, 20, 21, 60, 61, 150, 151, 400].map(tiers), [0, 0, 1, 1, 2, 2, 3, 3]);
   assert.equal(competitionTier(make({ id: 'x', sourceId: 'freelancer', proposals: null }).opportunity), 1, 'unknown is normal');
-  assert.equal(competitionTier(make({ id: 'x', sourceId: '99freelas', proposals: 5, marketplace: false }).opportunity), 1, 'a source without engagement types has no tier');
+  assert.equal(competitionTier(make({ id: 'x', sourceId: '99freelas', proposals: 5, marketplace: false }).opportunity), 0, 'a source with no engagement type is judged by its proposals too');
+  assert.equal(competitionTier(make({ id: 'x', sourceId: '99freelas', proposals: 200, marketplace: false }).opportunity), 3);
   assert.deepEqual(
     order([
       { id: 'reduced', sourceId: 'freelancer', proposals: 100, published: '2026-05-01T20:00:00Z' },
@@ -142,19 +143,21 @@ test('a project in a language outside the profile is at most a review; pt, en an
   assert.equal(decide(project({ sourceMetadata: { language: 'de' }, title: 'x', description: 'no skills at all' })).decision, 'skip', 'the cap never raises a skip');
 });
 
-test('99Freelas decisions are unchanged: no engagement type means no proposal cap and no language rule', () => {
+test('99Freelas takes part in the ladder as a freelance source: crowding is a caveat, an open budget never makes a top match', () => {
   const legacy = makeOpportunity('7', {
     title: 'Landing page em HTML e CSS',
     description: 'Preciso de uma landing page responsiva.',
     category: 'Web, Mobile & Software',
     subcategory: 'Desenvolvimento Web',
     proposalCount: 900,
-    sourceMetadata: { language: 'de' },
   });
-  assert.equal(legacy.employmentType, undefined);
+  assert.equal(legacy.employmentType, undefined, 'the source publishes no engagement type');
   const result = decide(legacy);
-  assert.equal(result.decision, 'shortlist');
-  assert.ok(!result.reasons.some((reason) => /proposals|language/.test(reason)));
+  assert.equal(result.decision, 'shortlist', 'never skipped or capped for competition');
+  assert.ok(result.reasons.includes('very crowded project (900 proposals): lowest priority in its group'));
+  assert.ok(!result.reasons.some((reason) => /^employment type/.test(reason)), 'no type is invented for it');
+  const calm = decide({ ...legacy, proposalCount: 5, description: 'Preciso de uma landing page responsiva em HTML e CSS para divulgar meu curso online, com formulário de contato, depoimentos e uma seção de perguntas frequentes, entrega em duas semanas.' });
+  assert.equal(calm.decision, 'shortlist', 'a budget that is open (unknown) does not block the green, but blocks the blue');
 });
 
 // ---------- the global per-run limit ----------

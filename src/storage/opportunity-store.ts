@@ -9,6 +9,7 @@ import {
   type OpportunityAccess,
   type OpportunityKey,
 } from '../domain/opportunity.js';
+import { AlertQueueStore, SCHEMA_V6 } from './alert-queue-store.js';
 import { ANALYSIS_SCHEMA, AnalysisStore } from './analysis-store.js';
 import { runInTransaction } from './db-util.js';
 import { DeliveryStore } from './delivery-store.js';
@@ -23,9 +24,10 @@ import { SourceCacheStore } from './source-cache-store.js';
  * 1: opportunities. 2: adds analyses and proposal_drafts. 3: adds the discovery queue, multi-part deliveries,
  * quota accounting and run locks. 4: adds the persistent source cache. 5: adds `top_match` to the accepted filter
  * decisions (the table is rebuilt because SQLite cannot change a CHECK) and the exchange-rate cache. Rows are copied
- * as they are: nothing in them changes.
+ * as they are: nothing in them changes. 6: adds the alert queue (which new opportunities competed for the alerts of a
+ * collection, and which of them are still owed); rows are untouched.
  */
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 
 const opportunitiesTable = (name: string): string => `
 CREATE TABLE IF NOT EXISTS ${name} (
@@ -91,6 +93,8 @@ export class OpportunityStore {
   readonly sourceCache: SourceCacheStore;
   /** The newest exchange rate to USD each source published per currency (never used to change a stored budget). */
   readonly exchangeRates: ExchangeRateStore;
+  /** The alert batch of each collection: what was selected to be delivered and what was only saved. */
+  readonly alertQueue: AlertQueueStore;
 
   /** Opens (creating the folder and file when missing) the database at `path`. */
   constructor(path: string) {
@@ -106,6 +110,7 @@ export class OpportunityStore {
       this.quota = new QuotaStore(this.db);
       this.sourceCache = new SourceCacheStore(this.db);
       this.exchangeRates = new ExchangeRateStore(this.db);
+      this.alertQueue = new AlertQueueStore(this.db);
       this.hasStatement = this.db.prepare(
         'SELECT 1 AS present FROM opportunities WHERE source_id = ? AND external_id = ?',
       );
@@ -351,10 +356,12 @@ export class OpportunityStore {
       this.db.exec(SCHEMA_V3);
       this.db.exec(SCHEMA_V4);
       this.db.exec(SCHEMA_V5);
+      this.db.exec(SCHEMA_V6);
       this.allowTopMatch();
     });
-    if (version < SCHEMA_VERSION) {
-      // Local and offline: the rates already stored inside opportunities, each dated by its own collection time.
+    if (version < 5) {
+      // The rate table was just created: register the rates already stored inside opportunities, each dated by its own
+      // collection time (local and offline). Later upgrades leave it alone.
       new ExchangeRateStore(this.db).seedFromOpportunities();
     }
     if (version < SCHEMA_VERSION) {

@@ -68,9 +68,11 @@ test('the top match needs everything: a strong skill up front, a clear and modes
   assert.equal(decision({ description: `${DESCRIPTION} ${'More detail about every section of the page. '.repeat(100)}` }), 'shortlist', 'a very long brief is a large scope');
 });
 
-test('the strong skill must be up front: named only deep in a long brief it is not a top match', () => {
-  const filler = 'We are a family bakery that has been around for many years and we love our customers and our town. '.repeat(6);
-  assert.equal(decision({ title: 'Website for my bakery', description: `${filler}The page should use HTML and CSS.` }), 'shortlist');
+test('a specific skill must be up front: named only deep in a long brief the project is neither a top match nor a green, it is a review', () => {
+  const filler = 'We are a family bakery that has been around for many years and we love our customers and our town. '.repeat(9);
+  const deep = evaluate(freelancerProject({ title: 'Website for my bakery', description: `${filler}The page should use HTML and CSS.` }));
+  assert.equal(deep.decision, 'review');
+  assert.ok(deep.reasons.includes('no specific technical skill in the title or the start of the description'));
 });
 
 // ---------- exchange rates: per source and currency, valid for 24 hours ----------
@@ -184,7 +186,7 @@ test('a central skill outside the profile is a skip; beside an available skill i
   assert.ok(mixed.reasons.some((reason) => reason.startsWith('essential skill outside the profile')));
   const lead = evaluate(freelancerProject({ title: 'Help with my web project', description: 'A React front-end with a Python backend, mostly the Python side, running on the cloud for a few thousand users.' }));
   assert.equal(lead.decision, 'review');
-  const leadOnly = evaluate(freelancerProject({ title: 'Help with my project', description: 'Please build the whole backend in Python and Django, with an admin panel and a REST API for our team of ten people.' }));
+  const leadOnly = evaluate(freelancerProject({ title: 'Help with my project', description: 'Please build the whole thing in Python and Django, with a reporting module and a scheduler for our team of ten people.' }));
   assert.equal(leadOnly.decision, 'skip', 'central skill at the start of the description, nothing available named');
   assert.equal(translateReason('central skill outside the profile: "python" in the title'), 'habilidade central fora do perfil: "python" no título');
 });
@@ -215,7 +217,7 @@ test('the main task must be technical: payroll, stories, chat support and ads ar
   const disagree = evaluate(freelancerProject({ title: 'Copywriting help', description: 'Build a website in React and HTML with a blog. Copy comes later, and I will supply the photos for it.' }));
   assert.equal(disagree.decision, 'review');
   assert.match(mainCaveat(disagree.reasons)!, /^title names non-technical work/);
-  const filler = 'We are a family business that has been around for many years and we enjoy working with people. '.repeat(6);
+  const filler = 'We are a family business that has been around for many years and we enjoy working with people. '.repeat(9);
   assert.equal(evaluate(freelancerProject({ title: 'Help needed', description: `${filler}Also we have a website in HTML.` })).decision, 'review');
 });
 

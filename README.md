@@ -272,14 +272,24 @@ never marks the real notification, and repeating it with the same label sends no
 opportunity), `review` (🟡 worth reviewing: a real doubt or gap) and `skip` (never notified). Technical compatibility is judged **apart from
 attractiveness**: budget, competition and recency lower the ranking and add caveats, they do not turn a technically compatible project into a review
 or a skip. Everything is stored, but a run sends at most `MAX_TELEGRAM_ALERTS_PER_RUN` (5) Telegram alerts **in total, across all sources**, best
-first: top matches, then shortlist, then review. Inside each group: (1) a very crowded project (more than 150 proposals) goes last; (2) a clearly
+first: top matches, then shortlist, then review (see "Antiflood" below for which opportunities compete). Inside each group: (1) a very crowded project (more than 150 proposals) goes last; (2) a clearly
 relevant main task first; (3) the most recent publication day (Brasília calendar day; unknown last); (4) fewer caveats; (5) the better budget
 (reaches the floor, crosses it, no fresh conversion, below it); (6) fewer proposals; (7) more strong skills; (8) the stable `source:id`, so the order
-never depends on insertion order. What does not fit stays **pending and unmarked** and is sent by a later run; data older than the source allows is
-withheld first and does not use a slot. The cap is never lifted to make room. `top_match` is produced only for sources that publish an engagement type
-(Freelancer.com, Remotive); 99Freelas decisions are not touched by these rules.
+never depends on insertion order. Data older than the source allows is withheld and does not use a slot. The cap is never lifted to make room. All
+sources take part in the ladder, including 99Freelas (a source that publishes no engagement type is a freelance projects source); an unknown budget
+never blocks a green and always blocks the blue.
 
-## Filter (`basic-v8`)
+**Antiflood: a persistent alert batch per collection (schema version 6).** Only the opportunities **stored for the first time by the collection** compete
+for its alerts. The best `MAX_TELEGRAM_ALERTS_PER_RUN` of them (blue included; top match, shortlist, review, by the ranking above) are recorded in
+`alert_queue` as `selected` **before anything is sent**, and stay owed until Telegram confirms them: a failed send is retried by the next run, ahead of
+any new selection, and the free slots are the cap minus what is still owed. The others of that collection are recorded as `overflow`; everything older
+is **backlog**. Overflow and backlog are stored and consultable but are **never alerted automatically** and their `notified_at` is never touched: only
+a confirmed Telegram delivery writes it. A selected item whose data goes stale (24 hours for Freelancer.com) is released (`expired`). `npm run
+collect` records the batch too (it sends nothing); `DRY_RUN` renders it and marks nothing. The backlog is sent only on purpose:
+`npm run backlog` lists it, best first (read only); `npm run backlog -- --send [--limit N]` sends the best N (default the cap, at most 20), obeys
+`DRY_RUN` and the 24-hour data rule, and marks only what Telegram confirms.
+
+## Filter (`basic-v9`)
 
 Deterministic, no AI. Every decision carries concrete reasons, the matched terms and the rule
 version. Signals are searched in title, description and skills:
@@ -307,19 +317,28 @@ when the text mentions a skill word; a freelance job that reads like a continuin
 (residence, work authorization) is at most `review`; a senior title is at most `review`. "Worldwide", Brazil, LATAM, South
 `America and the Americas are compatible. "Remote" is never read as worldwide. A strong skill that appears only in the skill **tags** (never in the title or description) is at most `review` for these sources.
 Freelancer.com projects are freelance by nature and have no location requirement, so only the type, category, team-role, seniority and
-tag rules apply to them. Projects from 99Freelas have no such fields and are evaluated exactly as before.
+tag rules apply to them. Projects from 99Freelas publish no engagement type or location: they are freelance projects, judged by the same category,
+main-task, central-skill, specific-skill and back-end rules (in Portuguese too), with no type or location invented.
 
-**Freelance projects (`basic-v8`).** Only for sources with an engagement type (Freelancer.com, Remotive). A second step runs after the skill rules
-and only lowers the result, except the last one, which may name an excellent match:
+**Freelance projects (`basic-v9`).** For every source: Freelancer.com and Remotive publish an engagement type, and a source that publishes none
+(99Freelas) is a freelance projects source. A second step runs after the skill rules and only lowers the result, except the last one, which may name
+an excellent match. **A green (`shortlist`) needs the central task inside the offered skills and a SPECIFIC skill in the title or the start of the
+description (about the first 100 words, 600 characters).** "Responsive", "front-end", "site", "web", "website" and the skill tags are generic and
+prove nothing alone (`genericSignalTerms` in the profile); HTML, CSS, JavaScript, TypeScript, React, WordPress, landing page, API, integration,
+automation, bot and Telegram are specific:
 
 - **`skip`** (irrelevant, closed, not technology, out of scope, incompatible): a category that is not technology; a **main task that is not
   technical** (payroll, story writing, trading, copywriting, translation, data entry, **chat support, customer support, virtual assistant**, and marketing
   such as **ads and SEO** when the title names no strong technical skill); a **central skill the profile does not offer** (another language such as Python
-  or Rust, native or cross-platform mobile apps, games, machine learning, DevOps, blockchain...) in the title, or at the start of the description with no
-  available skill beside it; a continuing team role; a location that excludes residents of Brazil. These are general rules with vocabulary in
-  `src/profile/don-bruno.ts` (`offTopicTasks`, `offTopicUnlessStrong`, `unavailableSkills`), not exceptions by id.
-- **`review`** (a real doubt or gap): an unclear main task (no technical deliverable in the title or the first 500 characters of the description, or title and
-  description disagree); an essential skill outside the profile **beside** an available one; a strong skill named only in the skill tags; a senior
+  or Rust, native or cross-platform mobile apps, games, machine learning, DevOps, blockchain, and site platforms such as Shopify, Webflow and Wix...)
+  in the title, or at the start of the description with no specific skill beside it (a platform is outside the profile only while it is not one of the
+  profile's configured skills: list it in the strong signals and it is offered); **back-end or full-stack work as the central task** (Laravel, Node.js,
+  scraping, WebSocket feeds, multi-tenant SaaS, or sign-up + login + uploads + a database) when nothing specific of the profile is named up front, or
+  when three or more back-end signals dominate the start; a continuing team role; a location that excludes residents of Brazil. These are general rules with vocabulary in
+  `src/profile/don-bruno.ts` (`offTopicTasks`, `offTopicUnlessStrong`, `unavailableSkills`, `backendWork`), not exceptions by id.
+- **`review`** (a real doubt or gap): an unclear main task (no technical deliverable in the title or the first 600 characters of the description, or title and
+  description disagree); **no specific technical skill up front** (only generic words); an essential skill outside the profile, or back-end work,
+  **beside** an available specific skill (ambiguous); a strong skill named only in the skill tags; a senior
   title; an advanced scope; a **very short deadline** (24 hours or less, written in the text); a **transactional main delivery**; a missing or unrecognized
   type; an ambiguous location; a language outside the profile.
 - **`shortlist`** (technically compatible): everything else with a strong skill in the text. A **low or crossing budget** and **competition** are caveats
@@ -363,6 +382,7 @@ When the rule version changes, stored decisions are re-evaluated automatically (
 | `npm run analyses`       | Show stored AI analyses by recommendation (`-- --details`, `-- --proposals`, `-- --messages`); discards drafts of superseded versions |
 | `npm run notify:analyses`| Deliver saved analyses to Telegram; never calls Gemini                   |
 | `npm run notify:demo`    | One demonstration delivery of a saved analysis (`-- --id <id> [--label x]`) |
+| `npm run backlog`        | List the owed backlog that automatic alerts never send (read only); `-- --send [--limit N]` sends the best N on purpose (obeys `DRY_RUN`) |
 | `npm run access:refresh` | Re-read one opportunity's detail (`-- --id <sourceId:externalId>`, 1 request) and update only its access |
 | `npm test`               | Offline tests (Node's built-in runner; no network, no Telegram, no Gemini) |
 | `npm run typecheck`      | Type-check without emitting files                                        |

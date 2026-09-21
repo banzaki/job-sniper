@@ -23,8 +23,12 @@ import { findTerms } from './keyword-match.js';
  * they no longer cap a shortlist); a central skill the profile does not offer, chat support and marketing tasks are
  * skipped; a transactional scope only counts when it is the main delivery; budgets convert with a fresh (24 hours) rate
  * cached per source and currency. Results for 99Freelas are unchanged.
+ * basic-v9: a green needs a SPECIFIC technical skill in the title or the start of the description ("responsive", "front-end",
+ * "site" and tags are generic); back-end and full-stack work as the central task is a skip when clearly incompatible and a
+ * review when ambiguous; a site platform outside the configured skills (Shopify, Webflow, Wix...) follows the same central-skill
+ * rule, driven by the profile; 99Freelas takes part in the ladder (a source with no engagement type is freelance).
  */
-export const FILTER_RULE_VERSION = 'basic-v8';
+export const FILTER_RULE_VERSION = 'basic-v9';
 
 interface CategoryInfo {
   direct: string | null;

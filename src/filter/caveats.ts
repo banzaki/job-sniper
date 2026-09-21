@@ -8,7 +8,7 @@
 export const CAVEAT_ORDER: readonly RegExp[] = [
   /^location .*(ambiguous|not stated)|^location not stated$|^description mentions/,
   /^employment type (not stated|".*" is not recognized)|^project language/,
-  /^title names non-technical work|^technical deliverable is not clear|^essential skill outside the profile/,
+  /^title names non-technical work|^technical deliverable is not clear|^essential skill outside the profile|^back-end work beside|^no specific technical skill|^category ".*" is not technology, but/,
   /^very short deadline|^transactional scope/,
   /^seniority in the title/,
   /^strong skills appear only as tags/,
@@ -33,7 +33,7 @@ export function caveatCount(reasons: readonly string[]): number {
 }
 
 /** Doubts about the task itself (not its price or competition): a clearly relevant main task has none of them. */
-const TASK_DOUBT: readonly RegExp[] = [/^title names non-technical work|^technical deliverable is not clear|^essential skill outside the profile|^strong skills appear only as tags|^no strong technical signal/];
+const TASK_DOUBT: readonly RegExp[] = [/^title names non-technical work|^technical deliverable is not clear|^essential skill outside the profile|^back-end work beside|^no specific technical skill|^category ".*" is not technology, but|^strong skills appear only as tags|^no strong technical signal/];
 
 /** Is the main task clearly relevant, judging from the stored reasons? */
 export function mainTaskIsClear(reasons: readonly string[]): boolean {

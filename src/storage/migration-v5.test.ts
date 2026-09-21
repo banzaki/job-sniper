@@ -36,6 +36,7 @@ function createVersion4Database(path: string): void {
 
   const db = new DatabaseSync(path);
   db.exec('DROP TABLE exchange_rates');
+  db.exec('DROP TABLE alert_queue');
   db.exec('ALTER TABLE opportunities RENAME TO opportunities_new');
   db.exec(OLD_TABLE);
   db.exec('INSERT INTO opportunities SELECT * FROM opportunities_new');
@@ -78,7 +79,7 @@ test('upgrading a version-4 database accepts top_match, keeps every row byte for
   store.close();
 
   const check = new DatabaseSync(path, { readOnly: true });
-  assert.equal(check.prepare('PRAGMA user_version').get()?.user_version, 5);
+  assert.equal(check.prepare('PRAGMA user_version').get()?.user_version, 6);
   check.close();
 
   // Undo the two deliberate writes above: everything else must still be exactly what version 4 had.
@@ -89,13 +90,13 @@ test('upgrading a version-4 database accepts top_match, keeps every row byte for
   assert.deepEqual(snapshot(path), before);
 });
 
-test('the version-4 file is backed up once as pre-v5, untouched, and reopening changes nothing', () => {
+test('the version-4 file is backed up once as pre-v6, untouched, and reopening changes nothing', () => {
   const path = join(workDir, 'v4b.db');
   createVersion4Database(path);
   const original = snapshot(path);
   new OpportunityStore(path).close();
 
-  const backup = join(workDir, 'v4b.pre-v5.db');
+  const backup = join(workDir, 'v4b.pre-v6.db');
   assert.ok(existsSync(backup));
   const copy = new DatabaseSync(backup, { readOnly: true });
   assert.equal(copy.prepare('PRAGMA user_version').get()?.user_version, 4, 'the backup is still version 4');
@@ -109,7 +110,7 @@ test('the version-4 file is backed up once as pre-v5, untouched, and reopening c
   assert.deepEqual(snapshot(backup), original, 'the backup is never overwritten');
 });
 
-test('a fresh database is created directly at version 5, accepts top_match and needs no backup', () => {
+test('a fresh database is created directly at version 6, accepts top_match and needs no backup', () => {
   const path = join(workDir, 'fresh.db');
   const store = new OpportunityStore(path);
   store.insert(makeOpportunity('1'), { ...makeFilter('shortlist'), decision: 'top_match' }, NOW.toISOString());
@@ -117,7 +118,7 @@ test('a fresh database is created directly at version 5, accepts top_match and n
   assert.deepEqual(store.listPendingNotification(['top_match']), [{ sourceId: SOURCE, externalId: '1' }]);
   assert.deepEqual(store.listPendingNotification(['shortlist', 'review']), []);
   store.close();
-  assert.ok(!existsSync(join(workDir, 'fresh.pre-v5.db')));
+  assert.ok(!existsSync(join(workDir, 'fresh.pre-v6.db')));
 });
 
 test('the exchange-rate cache keeps the newest observation per source and currency and ignores unusable data', () => {

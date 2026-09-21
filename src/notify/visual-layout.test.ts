@@ -207,7 +207,7 @@ test('Atenção holds ONE caveat, by priority: restricted access, language, adva
   assert.equal(basicAttention(marketplace(100), filter('review', ['seniority in the title: senior', crowded]), NOW), 'Senioridade no título: senior.');
   assert.equal(basicAttention(marketplace(30), filter('review', ['seniority in the title: senior']), NOW), 'Senioridade no título: senior.');
   assert.equal(basicAttention(marketplace(30), filter('shortlist', ['strong signals: HTML']), NOW), null, 'nothing to warn about');
-  assert.equal(basicAttention(projectOpportunity({ proposalCount: 100 }), filter('shortlist', ['strong signals: HTML']), NOW), null, 'a source with no engagement type has no competition scale');
+  assert.equal(basicAttention(projectOpportunity({ proposalCount: 100 }), filter('shortlist', ['strong signals: HTML']), NOW), 'Concorrência alta: 100 propostas já enviadas.', 'a source with no engagement type is judged by its proposals too');
 });
 
 test('a message carries a single Atenção block, or none', () => {

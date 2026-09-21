@@ -16,6 +16,7 @@
     "notify:analyses": "tsx src/cli/notify-analyses.ts",
     "notify:demo": "tsx src/cli/notify-demo.ts",
     "collect": "tsx src/cli/collect.ts",
+    "backlog": "tsx src/cli/backlog.ts",
     "telegram:test": "tsx src/cli/telegram-test.ts"
   },
   "keywords": [],

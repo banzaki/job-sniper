@@ -109,7 +109,7 @@ test('the message stays under the ceiling with very long fields, and text from t
 test('the filter keeps a defined technology project and stores, without alerting, what is not that', () => {
   assert.equal(judged(project()).decision, 'shortlist');
   assert.equal(judged(project({ title: 'Long-term web developer for our agency', description: 'React developer to join our team on an ongoing basis.' })).decision, 'skip', 'a continuing team role');
-  assert.equal(judged(project({ jobs: [{ id: 9, name: 'Copywriting', category: { name: 'Writing & Content' } }], title: 'Landing page copy', description: 'Write copy for a landing page in HTML.' })).decision, 'skip', 'a category that is not technology');
+  assert.equal(judged(project({ jobs: [{ id: 9, name: 'Copywriting', category: { name: 'Writing & Content' } }], title: 'Landing page copy', description: 'Write copy for a landing page in HTML.' })).decision, 'review', 'a category that is not technology, but a specific skill is named in the title: a doubt, not a skip');
   assert.equal(judged(project({ title: 'Senior React developer', description: 'A React landing page.' })).decision, 'review', 'senior title');
   assert.equal(judged(project({ status: 'closed' })).decision, 'skip', 'a closed project');
   assert.equal(judged(project({ jobs: [{ id: 5, name: 'Logo Design', category: { name: 'Design, Media & Architecture' } }], title: 'Minimalist logo', description: 'Two-tone logo.' })).decision, 'skip', 'no skill of the profile');

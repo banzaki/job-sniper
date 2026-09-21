@@ -2,8 +2,8 @@ import type { TransactionalVocabulary } from '../profile/interest-profile.js';
 import { normalizeText, padWords } from '../text.js';
 import { findTerms } from './keyword-match.js';
 
-/** How much of the description counts as "the start": where a project states what it needs delivered. */
-export const DESCRIPTION_LEAD_LENGTH = 500;
+/** How much of the description counts as "the start" (about the first 100 words): where a project states what it needs delivered. */
+export const DESCRIPTION_LEAD_LENGTH = 600;
 
 
 /**

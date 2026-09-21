@@ -62,4 +62,16 @@ export interface InterestProfile {
   offTopicUnlessStrong?: readonly KeywordRule[];
   /** Signs of a large scope (enterprise, marketplace, SaaS...): never a "top match", but not a doubt by themselves. */
   largeScopeSignals?: readonly KeywordRule[];
+  /**
+   * Canonical terms of `strongSignals` and `weakSignals` that are too generic to prove fit alone ("responsive", "front-end",
+   * "site"...). A green (shortlist) needs a SPECIFIC skill, one of the other terms, in the title or the start of the
+   * description. Omit to skip this check.
+   */
+  genericSignalTerms?: readonly string[];
+  /**
+   * Back-end work the profile does not offer. A strong word is one hit; two distinct weak words count as one hit. Central to the
+   * work (in the title, or dominating the start of the description) with no specific skill up front it is a skip; beside a
+   * specific skill it is a doubt (review).
+   */
+  backendWork?: { strong: readonly KeywordRule[]; weak: readonly KeywordRule[] };
 }

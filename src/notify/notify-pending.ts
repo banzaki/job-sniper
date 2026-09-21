@@ -20,6 +20,13 @@ export interface NotifyOptions {
   analysisVersion?: string;
   /** When given, only these opportunities are considered; everything else stays untouched. */
   only?: readonly OpportunityKey[];
+  /**
+   * When given, these are the ONLY opportunities whose first notification may be sent in this run (the alert batch of the
+   * collection, or an explicit manual pick). Every other undelivered opportunity is backlog: it stays stored and unmarked. An
+   * AI update for an opportunity that was already delivered is not affected; an analysis of one that was never delivered and is
+   * outside this list is not announced either. Omit to consider everything owed (the older behavior).
+   */
+  alertKeys?: readonly OpportunityKey[];
   /** Only to recognize known skill names when showing the verification. */
   candidate?: CandidateProfile;
   format?: FormatOptions;
@@ -160,7 +167,10 @@ export async function notifyPending(options: NotifyOptions): Promise<NotifyRepor
     entry[field] = true;
     pending.set(idOf(key), entry);
   };
-  for (const key of store.listPendingNotification(decisions, analysisVersion)) add(key, 'opportunity');
+  const batch = options.alertKeys ? new Set(options.alertKeys.map(idOf)) : null;
+  for (const key of store.listPendingNotification(decisions, analysisVersion)) {
+    if (batch === null || batch.has(idOf(key))) add(key, 'opportunity');
+  }
   if (analysisVersion) {
     for (const key of store.analyses.listPendingNotification(analysisVersion)) add(key, 'analysis');
     report.suppressedBySkip =
@@ -174,6 +184,11 @@ export async function notifyPending(options: NotifyOptions): Promise<NotifyRepor
     report.pending += 1;
     const stored = store.get(entry.key);
     if (!stored) continue;
+    // Backlog: never delivered, not in the batch. Its analysis alone must not announce it either.
+    if (batch !== null && !entry.opportunity && stored.notifiedAt === null && !batch.has(id)) {
+      report.pending -= 1;
+      continue;
+    }
     const maxAge = options.maxAgeHoursBySource?.[stored.opportunity.sourceId];
     if (maxAge !== undefined && !(now().getTime() - Date.parse(stored.opportunity.fetchedAt) <= maxAge * 3_600_000)) {
       report.staleWithheld += 1;

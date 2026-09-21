@@ -23,7 +23,7 @@ const job = (over: Partial<Opportunity> = {}): Opportunity =>
 const evaluate = (opportunity: Opportunity) => evaluateOpportunity(opportunity, donBrunoProfile, NOW);
 
 test('the rule version identifies the engagement policy', () => {
-  assert.equal(FILTER_RULE_VERSION, 'basic-v8');
+  assert.equal(FILTER_RULE_VERSION, 'basic-v9');
 });
 
 test('freelance with a compatible location and strong skills is shortlisted, and the type is kept visible', () => {
@@ -110,7 +110,10 @@ test('a category that is clearly not technology is skipped, even when the text m
   assert.equal(copywriter.reasons[0], 'category "Writing" is not technology');
   assert.equal(evaluate(job({ title: 'Sales Development Rep', description: 'Call leads every day.', category: 'Sales' })).decision, 'skip');
   assert.equal(evaluate(job({ category: 'Software Development' })).decision, 'shortlist', 'technology categories are not excluded');
-  assert.equal(evaluate(job({ category: 'Design' })).decision, 'skip');
+  // A category alone never beats an explicit technical deliverable: a React title in a non-technology category is a doubt, not a skip.
+  const designReact = evaluate(job({ category: 'Design' }));
+  assert.equal(designReact.decision, 'review');
+  assert.ok(designReact.reasons.includes('category "Design" is not technology, but a specific technical skill is named up front'));
 });
 
 test('freelance that reads like a continuing team role is skipped; a defined project is not', () => {
@@ -134,17 +137,17 @@ test('a strong skill that only appears in the skill tags, never in the text, is 
   assert.equal(evaluate(job({ skills: ['HTML'] })).decision, 'shortlist', 'named in the description: fine');
 });
 
-test('project sources are untouched: without an engagement type the result is exactly what the skill rules say', () => {
+test('a source with no engagement type is a freelance projects source: it takes part in the ladder, with no type or location invented', () => {
   const project = makeOpportunity('9', {
     title: 'Landing page em HTML e CSS',
     description: 'Preciso de uma landing page responsiva.',
     category: 'Web, Mobile & Software',
     subcategory: 'Desenvolvimento Web',
-    locationRequirement: 'USA Only', // ignored: this source publishes no engagement type
   });
   assert.equal(project.employmentType, undefined);
   const result = evaluate(project);
   assert.equal(result.decision, 'shortlist');
+  assert.notEqual(result.decision, 'top_match', 'its budget is open: never an excellent match');
   assert.ok(!result.reasons.some((reason) => /employment|location|seniority/.test(reason)));
 });
 
