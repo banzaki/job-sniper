@@ -24,4 +24,6 @@ export interface InterestProfile {
   excludedCategories: readonly string[];
   /** Categories that say nothing about the work ("Other"); never a reason to skip. */
   nonSpecificCategories: readonly string[];
+  /** Languages the person can work in (ISO 639-1). A project in another language is at most a review. Omit to accept any. */
+  languages?: readonly string[];
 }

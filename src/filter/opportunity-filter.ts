@@ -8,8 +8,10 @@ import { applyEngagementPolicy } from './engagement-policy.js';
  * basic-v3: adds the engagement/location policy for job sources; results for project sources are unchanged.
  * basic-v4: adds the Freelancer.com non-technology categories to the profile and lets the policy handle a source
  * that publishes no location; results for 99Freelas are unchanged.
+ * basic-v5: a freelance project with more than 150 proposals is skipped and one in a language outside the profile is at
+ * most a review; results for 99Freelas are unchanged.
  */
-export const FILTER_RULE_VERSION = 'basic-v4';
+export const FILTER_RULE_VERSION = 'basic-v5';
 
 interface CategoryInfo {
   direct: string | null;

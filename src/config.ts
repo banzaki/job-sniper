@@ -15,6 +15,8 @@ export interface AppConfig {
   sources: SourceName[];
   /** Hours between two queries to the Remotive API (at least 6; failed attempts count too). */
   remotiveMinIntervalHours: number;
+  /** Most Telegram alerts sent in one run, across all sources; the rest stay pending, unmarked. */
+  maxTelegramAlertsPerRun: number;
   /** Freelancer.com Personal Access Token (valid 30 days); null when unset, which only disables that source. Never printed. */
   freelancerToken: string | null;
   telegramBotToken: string | null;
@@ -31,6 +33,8 @@ export type SourceName = (typeof SOURCE_NAMES)[number];
 export const DEFAULT_SOURCES: readonly SourceName[] = ['99freelas'];
 /** The Remotive documentation advises at most 4 queries a day. */
 export const DEFAULT_REMOTIVE_MIN_INTERVAL_HOURS = 6;
+/** Alerts per run: a small, ranked batch instead of a flood. */
+export const DEFAULT_MAX_TELEGRAM_ALERTS_PER_RUN = 5;
 export const DEFAULT_NOTIFY_DECISIONS: readonly FilterDecision[] = ['shortlist', 'review'];
 
 const DECISIONS: readonly FilterDecision[] = ['shortlist', 'review', 'skip'];
@@ -93,6 +97,7 @@ export function loadConfig(
     notifyDecisions: parseDecisions(env.TELEGRAM_NOTIFY_DECISIONS, warn),
     sources,
     remotiveMinIntervalHours,
+    maxTelegramAlertsPerRun: positiveInteger(env, 'MAX_TELEGRAM_ALERTS_PER_RUN', DEFAULT_MAX_TELEGRAM_ALERTS_PER_RUN),
     freelancerToken: env.FREELANCER_OAUTH_TOKEN?.trim() || null,
     telegramBotToken: env.TELEGRAM_BOT_TOKEN?.trim() || null,
     telegramChatId: env.TELEGRAM_CHAT_ID?.trim() || null,

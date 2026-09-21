@@ -3,6 +3,8 @@ import type { OpportunityKey } from '../domain/opportunity.js';
 import type { CandidateProfile } from '../profile/candidate-profile.js';
 import type { DeliveryRow } from '../storage/delivery-store.js';
 import type { OpportunityStore } from '../storage/opportunity-store.js';
+import { compareForAlert } from '../filter/ranking.js';
+import type { StoredOpportunity } from '../storage/opportunity-store.js';
 import { analysisDeliveryRef, sendDeliveryParts, type DeliveryAttempt } from './deliver.js';
 import { formatOpportunityMessage, type FormatOptions } from './format-message.js';
 import { NotificationError, type Notifier } from './notifier.js';
@@ -26,6 +28,11 @@ export interface NotifyOptions {
    * 24 h). An older, still unsent opportunity is withheld and reported, never sent from stale data and never marked.
    */
   maxAgeHoursBySource?: Readonly<Record<string, number>>;
+  /**
+   * Most notifications sent in this run, across ALL sources. Owed items are ranked first (shortlist, crowding tier, most
+   * recent day, strong skills, fewer proposals, stable id); those that do not fit stay pending and are never marked.
+   */
+  maxAlerts?: number;
   now?: () => Date;
 }
 
@@ -53,6 +60,8 @@ export interface NotifyReport {
   suppressedBySkip: number;
   /** Unsent opportunities whose data is older than their source allows: withheld, not marked as notified. */
   staleWithheld: number;
+  /** Owed notifications that did not fit under the per-run limit: still pending, not marked. */
+  heldByLimit: number;
   failures: { id: string; message: string; ambiguous: boolean }[];
   /** Set when a failure made further sending pointless; remaining items stay pending. */
   aborted: string | null;
@@ -91,6 +100,7 @@ export async function notifyPending(options: NotifyOptions): Promise<NotifyRepor
     incompleteDeliveries: 0,
     suppressedBySkip: 0,
     staleWithheld: 0,
+    heldByLimit: 0,
     failures: [],
     aborted: null,
   };
@@ -98,6 +108,8 @@ export async function notifyPending(options: NotifyOptions): Promise<NotifyRepor
   const wanted = (key: OpportunityKey): boolean => allowed === null || allowed.has(idOf(key));
 
   const handled = new Set<string>();
+  /** Notifications attempted in this run (a resumed delivery counts), against options.maxAlerts. */
+  let attempted = 0;
 
   const conclude = (delivery: DeliveryRow, attempt: DeliveryAttempt): boolean => {
     report.parts.sent += attempt.partsSent;
@@ -135,6 +147,7 @@ export async function notifyPending(options: NotifyOptions): Promise<NotifyRepor
       }
       if (dryRun || delivery.ref !== currentRef) continue;
       report.pending += 1;
+      attempted += 1;
       handled.add(idOf(delivery.key));
       if (!conclude(delivery, await sendDeliveryParts(store, notifier, delivery, now))) return report;
     }
@@ -154,17 +167,30 @@ export async function notifyPending(options: NotifyOptions): Promise<NotifyRepor
       store.listPendingNotification(decisions).length - store.listPendingNotification(decisions, analysisVersion).length;
   }
 
+  // Everything owed and still usable, with its stored data, so it can be ranked before anything is sent.
+  const candidates: { id: string; entry: Pending; stored: StoredOpportunity }[] = [];
   for (const [id, entry] of pending) {
     if (!wanted(entry.key) || handled.has(id) || held.has(id)) continue;
     report.pending += 1;
+    const stored = store.get(entry.key);
+    if (!stored) continue;
+    const maxAge = options.maxAgeHoursBySource?.[stored.opportunity.sourceId];
+    if (maxAge !== undefined && !(now().getTime() - Date.parse(stored.opportunity.fetchedAt) <= maxAge * 3_600_000)) {
+      report.staleWithheld += 1;
+      continue;
+    }
+    candidates.push({ id, entry, stored });
+  }
+  candidates.sort((a, b) => compareForAlert(a.stored, b.stored));
+
+  for (const { id, entry, stored } of candidates) {
+    // The limit is global, not per source: what does not fit stays pending, untouched and unmarked.
+    if (options.maxAlerts !== undefined && attempted >= options.maxAlerts) {
+      report.heldByLimit += 1;
+      continue;
+    }
+    attempted += 1;
     try {
-      const stored = store.get(entry.key);
-      if (!stored) continue;
-      const maxAge = options.maxAgeHoursBySource?.[stored.opportunity.sourceId];
-      if (maxAge !== undefined && !(now().getTime() - Date.parse(stored.opportunity.fetchedAt) <= maxAge * 3_600_000)) {
-        report.staleWithheld += 1;
-        continue;
-      }
       const analysis = analysisVersion && entry.analysis ? store.analyses.get(entry.key, analysisVersion) : null;
 
       if (analysis && analysisVersion) {
@@ -191,6 +217,7 @@ export async function notifyPending(options: NotifyOptions): Promise<NotifyRepor
         if (delivery?.status === 'complete') {
           // Everything was confirmed earlier; only the flags were missing (crash between the two steps).
           applyCompletion(store, delivery, now().toISOString());
+          attempted -= 1; // nothing was sent, so it does not use a slot
           continue;
         }
         delivery ??= store.deliveries.create(

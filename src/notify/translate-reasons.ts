@@ -50,6 +50,8 @@ const RULES: { pattern: RegExp; render: (match: RegExpExecArray) => string }[] =
     pattern: /^strong skills appear only as tags, not in the title or description$/,
     render: () => 'as habilidades aparecem só como tags, não no título nem na descrição',
   },
+  { pattern: /^too many proposals \((\d+)\) for an automatic alert$/, render: (m) => `propostas demais (${m[1]}) para alerta automático` },
+  { pattern: /^project language "(.+)" is not one of the profile languages$/, render: (m) => `idioma do projeto ("${m[1]}") fora dos idiomas do perfil` },
   { pattern: /^employment type not stated$/, render: () => 'tipo de contratação não informado' },
   { pattern: /^employment type "(.+)" is not recognized$/, render: (m) => `tipo de contratação "${m[1]}" não reconhecido` },
   { pattern: /^location "(.+)" excludes residents of Brazil$/, render: (m) => `localização "${m[1]}" exclui quem mora no Brasil` },

@@ -238,6 +238,14 @@ saved analysis (no AI, no site access). It is stored as its own delivery, so it 
 repeating it with the same label sends nothing new. With `DRY_RUN=true` it only prints and writes nothing. An opportunity
 that has no analysis (every Remotive job) is previewed with its basic message, prefixed "🧪 PRÉVIA".
 
+**Ranking and limit.** Everything is stored, but a run sends at most `MAX_TELEGRAM_ALERTS_PER_RUN` (5) Telegram alerts **in total, across all
+sources**. Owed alerts are ranked first: (1) shortlist before review; (2) crowding tier of a project marketplace: up to 20 proposals is
+high priority, 21-60 normal, 61-150 reduced (a source without proposal counts is normal); (3) the most recent publication day (Brasília
+calendar day; unknown last); (4) more strong skills; (5) fewer proposals; (6) the stable id, so the order never depends on insertion
+order. What does not fit stays **pending and unmarked** and is sent by a later run; data older than the source allows is withheld first
+and does not use a slot. A freelance project with **more than 150 proposals** is stored but never alerted automatically, and a project in a
+language outside the profile languages (`pt`, `en`) is at most a review. The 99Freelas decisions are not touched by these rules.
+
 **Projects from Freelancer.com** use one compact message too: classification, title, source, "🆕 Publicada há X dias" (calendar days in
 Brasília time, only up to 7 days), the client's budget in its **original currency** ("US$ 250–500", "INR 12.500–37.500", "R$ ..."; never
 converted), fixed or hourly, number of proposals, up to four skills, a one-sentence summary, the main caveat and the original link. The
@@ -327,6 +335,7 @@ Version 3 adds `discovery_queue`, `deliveries`, `delivery_parts`, `quota_usage`,
 | `REMOTIVE_MIN_INTERVAL_HOURS` | `6`                   | Hours between Remotive queries, at least 6 (read only when `remotive` is enabled) |
 | `DRY_RUN`                   | `true`                  | `true`: print messages, send nothing, mark nothing. Only an explicit `false` sends |
 | `TELEGRAM_NOTIFY_DECISIONS` | `shortlist,review`      | Which decisions are notified                               |
+| `MAX_TELEGRAM_ALERTS_PER_RUN` | `5`                   | Most alerts sent in one run, across all sources (positive integer) |
 | `AI_ENABLED`                | `false`                 | `true` turns AI analysis on (anything else keeps it off)   |
 | `AI_PROVIDER`               | `gemini`                | Only `gemini` exists; no automatic fallback                |
 | `AI_MODEL`                  | `gemini-3.6-flash`      | The single model used                                      |

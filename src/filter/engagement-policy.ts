@@ -3,6 +3,7 @@ import type { EmploymentType, Opportunity } from '../domain/opportunity.js';
 import type { InterestProfile } from '../profile/interest-profile.js';
 import { normalizeText, padWords } from '../text.js';
 import { classifyLocation, descriptionRestrictsLocation } from './location.js';
+import { MAX_PROPOSALS_FOR_ALERT } from './ranking.js';
 
 const TYPE_LABEL: Record<EmploymentType, string> = {
   freelance: 'freelance',
@@ -40,6 +41,8 @@ const TEAM_ROLE: readonly RegExp[] = [
  *  - location that excludes residents of Brazil       -> skip
  *  - location ambiguous, missing, or restricted in the description -> at most review
  *  - a senior title                                   -> at most review
+ *  - a freelance project with more than 150 proposals -> skip (stored, never alerted automatically)
+ *  - a project language outside the profile languages -> at most review
  *  - a strong skill that appears only in the skill tags, never in the title or description -> at most review
  * Opportunities without an employmentType (sources of projects) are returned untouched.
  */
@@ -53,6 +56,10 @@ export function applyEngagementPolicy(base: FilterResult, opportunity: Opportuni
 
   const outside = outsideCategory(opportunity, profile);
   if (outside) return skip(`category "${outside}" is not technology`);
+
+  if (type === 'freelance' && opportunity.proposalCount !== null && opportunity.proposalCount > MAX_PROPOSALS_FOR_ALERT) {
+    return skip(`too many proposals (${opportunity.proposalCount}) for an automatic alert`);
+  }
 
   // A source that publishes no location requirement at all (a projects marketplace) has nothing to judge here.
   const location = opportunity.locationRequirement === undefined ? null : classifyLocation(opportunity.locationRequirement);
@@ -74,6 +81,11 @@ export function applyEngagementPolicy(base: FilterResult, opportunity: Opportuni
   }
   if ((location === null || location.verdict === 'compatible') && descriptionRestrictsLocation(opportunity.description)) {
     caveats.push('description mentions a location or work-authorization requirement');
+  }
+
+  const language = typeof opportunity.sourceMetadata.language === 'string' ? (opportunity.sourceMetadata.language.trim().toLowerCase().split(/[-_]/)[0] ?? '') : '';
+  if (language !== '' && profile.languages && !profile.languages.includes(language)) {
+    caveats.push(`project language "${language}" is not one of the profile languages`);
   }
 
   const title = padWords(normalizeText(opportunity.title));
@@ -122,7 +134,7 @@ function looksLikeTeamRole(opportunity: Opportunity): boolean {
 export function mainCaveat(reasons: readonly string[]): string | null {
   const order: RegExp[] = [
     /^location .*(ambiguous|not stated)|^location not stated$|^description mentions/,
-    /^employment type (not stated|".*" is not recognized)/,
+    /^employment type (not stated|".*" is not recognized)|^project language/,
     /^seniority in the title/,
     /^strong skills appear only as tags/,
     /^conflicting or advanced scope|^only weak signals|^no strong technical signal|^status could not be confirmed|is outside the profile|^broad category/,

@@ -9,7 +9,7 @@ export function printNotifyReport(report: NotifyReport, decisions: string, dryRu
   );
   console.log(
     `  kinds: basic=${report.kinds.basic} ai-enriched=${report.kinds.enriched} ai-update=${report.kinds.aiUpdate} ` +
-      `| withheld (AI skip)=${report.suppressedBySkip} | withheld (data too old)=${report.staleWithheld}`,
+      `| withheld (AI skip)=${report.suppressedBySkip} | withheld (data too old)=${report.staleWithheld} | held by the per-run limit=${report.heldByLimit}`,
   );
   console.log(
     `  messages: sent=${report.parts.sent} still owed=${report.parts.pending} | incomplete deliveries=${report.incompleteDeliveries}`,

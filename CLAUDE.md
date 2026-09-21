@@ -55,6 +55,8 @@ terminal reports stay in English.
   counts), a 429/403 ends querying until Retry-After, no per-job requests, no page scraping. Always show Remotive as the
   source with the original link. Its pay text is never converted or called a budget. Read a site's terms of use before
   collecting from it; stop that integration when they forbid it (Workana's do).
+- Telegram alerts are capped per run across all sources (`MAX_TELEGRAM_ALERTS_PER_RUN`, default 5) and sent best first; what does not fit stays
+  pending and unmarked. Never lift the cap to "catch up" without the owner asking.
 - A Telegram delivery is marked complete only when every part is confirmed. Never re-send history because
   the presentation changed. Ambiguous confirmations are recorded and reported, never hidden.
 - A real database is migrated only after the migration was validated on a copy; the automatic

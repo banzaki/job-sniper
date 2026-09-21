@@ -101,4 +101,5 @@ export const donBrunoProfile: InterestProfile = {
     'Engineering & Science',
   ],
   nonSpecificCategories: ['Outra Categoria', 'Outros', 'Other'],
+  languages: ['pt', 'en'],
 };

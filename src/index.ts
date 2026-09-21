@@ -89,6 +89,7 @@ async function main(): Promise<number> {
         candidate: brunoCandidate,
         format: { sourceLabels: SOURCE_LABELS, sourceNotes: SOURCE_NOTES },
         maxAgeHoursBySource: SOURCE_DATA_MAX_AGE_HOURS,
+        maxAlerts: config.maxTelegramAlertsPerRun,
       });
       printNotifyReport(notification, config.notifyDecisions.join(','), config.dryRun);
       if (notification.failures.length > 0) exitCode = Math.max(exitCode, 1);

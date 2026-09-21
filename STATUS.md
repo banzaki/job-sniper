@@ -1,6 +1,6 @@
 # STATUS
 
-Last updated: 2026-09-21 (SPEC 007 Freelancer.com implemented and accepted live; SPEC 006 Remotive is cbd1516, SPEC 005 is 58f8831. Workana is suspended by its terms of use)
+Last updated: 2026-09-21 (SPEC 007.1 ranking and alert limit implemented and accepted live; SPEC 007 is 22b855a, SPEC 006 is cbd1516, SPEC 005 is 58f8831. Workana is suspended by its terms of use)
 
 ## RECON — Workana and Contra (2026-09-20, read-only; no adapter written, no Gemini, no Telegram)
 
@@ -51,6 +51,30 @@ listing dates; featured items breaking the newest-first order; reading Workana's
 Rough effort: Workana about one SPEC of the size of the 99Freelas adapter (client, parser, source, fixtures and about 40 offline
 tests, plus the small currency and budget-carry changes). Contra: at least two to three times that, dominated by unknowns.
 
+## SPEC 007.1 — Ranking and alert limit (hotfix; implemented and accepted live)
+
+Everything is still stored; only the best opportunities reach Telegram, without a flood.
+- **Limit:** `MAX_TELEGRAM_ALERTS_PER_RUN` (default 5, positive integer), **global per run, across all sources**. Owed alerts are ranked first; what does
+  not fit stays pending and is never marked as sent. Stale data (over 24 h for Freelancer.com) is withheld first and uses no slot; a failed
+  attempt uses one; dry-run obeys the same limit.
+- **Ranking (`src/filter/ranking.ts`):** (1) shortlist before review; (2) crowding tier of a projects marketplace: up to 20 proposals high, 21-60
+  normal, 61-150 reduced (sources without proposal counts are normal); (3) most recent publication day (Brasília calendar day, unknown last);
+  (4) more strong skills; (5) fewer proposals; (6) stable id `source:id`. The tier sits between decision and recency so "high priority" really
+  outranks a newer but crowded project (a reading of the spec's list; recency and strong skills still order everything inside a tier).
+- **Filter `basic-v5`:** a freelance project with **more than 150 proposals** is skipped (stored, never alerted); a project whose language is outside
+  the profile languages (`InterestProfile.languages`, now `pt` and `en`) is at most a review. Both apply only to sources that publish an engagement
+  type (Freelancer.com, Remotive); 99Freelas has none and is untouched.
+
+**Validation:** on a copy of the real database, then on the real one: 70 rows re-evaluated, **0 of the 30 99Freelas decisions changed**, 5 Freelancer.com
+projects went to skip (239, 274, 240, 384 and 166 proposals). Copy dry run: 5 sent, repeat 5 different ones, overlap 0.
+Controlled real run (`SOURCES=freelancer`, one page, AI off): 1 request, 2 new projects, **5 real alerts sent** (12 held by the limit, 0 failures), exactly the five
+best in ranking order. The repeat (dry-run, 1 request, 0 new): pending stayed 12, none of the 5 sent came back, and the next 5 would be rendered.
+No Gemini; `quota_usage` empty. Sent: 40724784 (5 strong skills, 50 proposals), 40724543, 40724570, 40724652, 40724709.
+
+**Limits:** a few of the top alerts are generic web work with small INR budgets (there is no budget criterion); the tier order can rank a
+crowded 5-skill project after a normal 3-skill one; `notify:analyses` is not capped (it is an explicit command). The remaining 12 alerts are owed
+and go out 5 per run while their data is under 24 hours old (Freelancer.com), then they are withheld.
+
 ## SPEC 007 — Freelancer.com as a project source (implemented and accepted live)
 
 **Status:** official API only (no scraping, no browser, no SDK, no new dependency). Freelancer.com is **off by default**
@@ -90,8 +114,7 @@ tests, plus the small currency and budget-carry changes). Contra: at least two t
   "PRÉVIA"); the repeat sent 0. Production flags untouched; `quota_usage` empty; Gemini not called.
 
 **Known limits / risks:**
-- **A first `npm run dev` with Freelancer.com enabled would send the 18 pending alerts (9 shortlist + 9 review) at once**; they become stale (withheld)
-  24 hours after collection. There is no per-run cap on basic notifications.
+- ~~A first run would send all pending alerts at once~~ fixed by SPEC 007.1: 5 alerts per run, best first.
 - The skill filter is text based: many matches are generic web work with hundreds of proposals and small budgets in INR/USD; the profile has no
   budget or competition criterion yet.
 - The Personal Access Token lasts 30 days; renewal is manual (see the README).
