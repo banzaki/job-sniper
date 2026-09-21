@@ -4,16 +4,17 @@ import { ConfigError, loadAiConfig, loadConfig, requireGeminiKey, requireTelegra
 
 const quiet = (): void => {};
 
-test('discovery settings default to 5 pages and 10 unseen opportunities', () => {
+test('run limits default to 20 pages, 100 new summaries and 20 details (independent, none promises full coverage)', () => {
   const config = loadConfig({}, quiet);
-  assert.equal(config.discoveryMaxPages, 5);
-  assert.equal(config.discoveryTargetNew, 10);
+  assert.equal(config.discoveryMaxPages, 20);
+  assert.equal(config.discoveryTargetNew, 100);
+  assert.equal(config.maxDetailsPerRun, 20);
 });
 
 test('blank discovery settings fall back to the defaults', () => {
   const config = loadConfig({ DISCOVERY_MAX_PAGES: '  ', DISCOVERY_TARGET_NEW: '' }, quiet);
-  assert.equal(config.discoveryMaxPages, 5);
-  assert.equal(config.discoveryTargetNew, 10);
+  assert.equal(config.discoveryMaxPages, 20);
+  assert.equal(config.discoveryTargetNew, 100);
 });
 
 test('valid discovery settings are used', () => {
@@ -36,7 +37,7 @@ for (const name of ['DISCOVERY_MAX_PAGES', 'DISCOVERY_TARGET_NEW']) {
 test('MAX_DETAILS_PER_RUN keeps its warn-and-fall-back behavior', () => {
   const warnings: string[] = [];
   const config = loadConfig({ MAX_DETAILS_PER_RUN: 'abc' }, (message) => warnings.push(message));
-  assert.equal(config.maxDetailsPerRun, 10);
+  assert.equal(config.maxDetailsPerRun, 20);
   assert.equal(warnings.length, 1);
 });
 
@@ -66,7 +67,20 @@ test('enabled AI accepts the intended operating values', () => {
     { AI_ENABLED: 'true', AI_PROVIDER: 'Gemini', AI_MODEL: ' gemini-3.6-flash ', AI_MAX_ANALYSES_PER_RUN: '20', GEMINI_API_KEY: ' k ' },
     quiet,
   );
-  assert.deepEqual(ai, { enabled: true, provider: 'gemini', model: 'gemini-3.6-flash', apiKey: 'k', maxAnalysesPerRun: 20 });
+  assert.deepEqual(ai, {
+    enabled: true, provider: 'gemini', model: 'gemini-3.6-flash', apiKey: 'k',
+    maxAnalysesPerRun: 20, minIntervalSeconds: 15, maxRequestsPerDay: 20,
+  });
+});
+
+test('the Gemini pacing and daily limits are configurable, validated only when AI is enabled', () => {
+  const ai = loadAiConfig({ AI_ENABLED: 'true', GEMINI_MIN_INTERVAL_SECONDS: '30', GEMINI_MAX_REQUESTS_PER_DAY: '15' }, quiet);
+  assert.equal(ai.minIntervalSeconds, 30);
+  assert.equal(ai.maxRequestsPerDay, 15);
+  for (const name of ['GEMINI_MIN_INTERVAL_SECONDS', 'GEMINI_MAX_REQUESTS_PER_DAY']) {
+    assert.throws(() => loadAiConfig({ AI_ENABLED: 'true', [name]: '0' }, quiet), (error: unknown) => error instanceof ConfigError && error.message.includes(name));
+  }
+  assert.doesNotThrow(() => loadAiConfig({ GEMINI_MIN_INTERVAL_SECONDS: 'abc' }, quiet));
 });
 
 for (const bad of ['0', '-1', '21', '1.5', 'abc', '100']) {

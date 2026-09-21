@@ -2,7 +2,9 @@ import { ANALYSIS_VERSION } from '../ai/current-version.js';
 import { ConfigError, loadAppConfig } from '../config.js';
 import type { OpportunityKey } from '../domain/opportunity.js';
 import { createNotifier } from '../notify/create-notifier.js';
+import { printNotifyReport } from '../notify/format-report.js';
 import { notifyPending } from '../notify/notify-pending.js';
+import { brunoCandidate } from '../profile/bruno-candidate.js';
 import { OpportunityStore } from '../storage/opportunity-store.js';
 
 const USAGE = 'Usage: npm run notify:analyses -- --only <sourceId:externalId>[,<sourceId:externalId>...] (repeatable)';
@@ -23,9 +25,9 @@ function parseOnly(argv: readonly string[]): OpportunityKey[] {
 }
 
 /**
- * Announces the AI analyses (current version) of the GIVEN opportunities only: no discovery, no analysis,
- * and no basic-filter notifications. Rules are the usual ones: a clear "skip" is never sent, each analysis
- * is announced once (its own notified_at), and nothing is marked in DRY_RUN or when delivery fails.
+ * Delivers the AI analyses (current version) of the GIVEN opportunities only: no discovery, no analysis, and
+ * no basic-filter notifications. A delivery is ONE compact message; an interrupted one resumes without
+ * repeating what was confirmed. Deliveries of the former multi-part format are reported, never resumed. A clear "skip" is never sent, and nothing is marked in DRY_RUN or when delivery fails.
  */
 async function main(): Promise<number> {
   const only = parseOnly(process.argv.slice(2));
@@ -41,13 +43,10 @@ async function main(): Promise<number> {
       dryRun: config.dryRun,
       analysisVersion: ANALYSIS_VERSION,
       only,
+      candidate: brunoCandidate,
       format: { sourceLabels: SOURCE_LABELS },
     });
-    console.log(
-      `analysis notifications: pending=${report.pending} ${config.dryRun ? `rendered=${report.rendered}` : `sent=${report.sent}`} ` +
-        `(ai-enriched=${report.kinds.enriched} ai-update=${report.kinds.aiUpdate}) failures=${report.failures.length}`,
-    );
-    for (const failure of report.failures) console.error(`  not notified ${failure.id}: ${failure.message}`);
+    printNotifyReport(report, 'analyses only', config.dryRun);
     return report.failures.length > 0 ? 1 : 0;
   } finally {
     store.close();

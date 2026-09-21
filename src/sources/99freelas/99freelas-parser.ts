@@ -1,5 +1,5 @@
 import { load } from 'cheerio';
-import { SourceResponseError } from '../source-errors.js';
+import { SourceNotFoundError, SourceResponseError } from '../source-errors.js';
 import { BASE_URL } from './99freelas-client.js';
 
 export interface ListingItem {
@@ -136,6 +136,10 @@ export function parseDetail(html: string): ParsedDetail {
   const statusCode = /idStatusProjeto\s*=\s*'(\d+)'/.exec(html)?.[1];
   if (!title || !statusCode) {
     const pageTitle = collapse($('title').first().text());
+    // The site answers HTTP 200 with this title for projects it cannot show (deleted, private, unknown id).
+    if (/n[aã]o foi poss[ií]vel acessar a p[aá]gina/i.test(pageTitle)) {
+      throw new SourceNotFoundError(`The site reports the project page as not accessible (page title: "${pageTitle}").`);
+    }
     throw new SourceResponseError(
       `Project page has no recognizable project data (page title: "${pageTitle}"). ` +
         'The project may not exist or the markup changed.',

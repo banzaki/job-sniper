@@ -8,24 +8,30 @@ import {
   AnalysisUnavailableError,
 } from './errors.js';
 import { buildPrompt } from './prompt.js';
+import { describeQuotaKind, parseQuotaFailure, realClock, type Clock } from './quota.js';
 
 const API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
 export interface GeminiOptions {
   timeoutMs: number;
-  /** Minimum gap between two HTTP calls; keeps a free-tier key under its per-minute limit. */
+  /** Minimum time between the START of two HTTP calls, retries included (free tier observed: 5 requests/minute). */
   minIntervalMs: number;
-  /** Pause before the single retry of a transient failure. */
+  /** Pause before the single retry of a transient failure (the interval above still applies to the retry). */
   retryDelayMs: number;
   /** Injectable for tests; defaults to the global fetch. */
   fetch: typeof fetch;
+  /** Injectable for tests; defaults to real time. */
+  clock: Clock;
+  /** Called before every request, retries included: reserves quota and can refuse. */
+  gate?: { beforeRequest(): Promise<void> };
 }
 
 const DEFAULT_OPTIONS: GeminiOptions = {
   timeoutMs: 60_000,
-  minIntervalMs: 6_500,
+  minIntervalMs: 15_000,
   retryDelayMs: 4_000,
   fetch: (...args) => fetch(...args),
+  clock: realClock,
 };
 
 const TRANSIENT_STATUSES = new Set([408, 500, 502, 503, 504]);
@@ -42,7 +48,7 @@ const TRANSIENT_STATUSES = new Set([408, 500, 502, 503, 504]);
 export class GeminiAnalyzer implements OpportunityAnalyzer {
   readonly id = 'gemini';
   readonly model: string;
-  readonly stats: AnalyzerStats = { requests: 0, lastStatus: null };
+  readonly stats: AnalyzerStats = { requests: 0, retries: 0, lastStatus: null };
 
   private readonly apiKey: string;
   private readonly options: GeminiOptions;
@@ -73,13 +79,17 @@ export class GeminiAnalyzer implements OpportunityAnalyzer {
       return await this.generateOnce(system, user);
     } catch (error) {
       if (!(error instanceof AnalysisUnavailableError)) throw error;
-      await new Promise((resolve) => setTimeout(resolve, this.options.retryDelayMs));
+      this.stats.retries += 1;
+      await this.options.clock.sleep(this.options.retryDelayMs);
       return this.generateOnce(system, user);
     }
   }
 
   private async generateOnce(system: string, user: string): Promise<{ text: string; modelVersion: string | null }> {
+    // In-process pacing first, then the persistent gate (daily limit, cooldown, pacing across processes).
     await this.throttle();
+    await this.options.gate?.beforeRequest();
+    this.lastCallAt = this.options.clock.now();
     this.stats.requests += 1;
     this.stats.lastStatus = null;
 
@@ -109,7 +119,12 @@ export class GeminiAnalyzer implements OpportunityAnalyzer {
     if (!response.ok) {
       const detail = this.describeError(body);
       if (response.status === 429) {
-        throw new AnalysisQuotaError(`Gemini quota or rate limit reached (HTTP 429)${detail}.`);
+        const info = parseQuotaFailure(response.headers, body, this.options.clock.now());
+        const retry = info.retryAfterSeconds !== null ? `; retry after ${info.retryAfterSeconds}s` : '';
+        throw new AnalysisQuotaError(
+          `Gemini quota or rate limit reached (HTTP 429, ${describeQuotaKind(info.kind)}${retry})${detail}.`,
+          info,
+        );
       }
       if (TRANSIENT_STATUSES.has(response.status)) {
         throw new AnalysisUnavailableError(`Gemini is temporarily unavailable (HTTP ${response.status})${detail}.`);
@@ -148,10 +163,10 @@ export class GeminiAnalyzer implements OpportunityAnalyzer {
     return typeof message === 'string' ? `: ${this.scrub(message).slice(0, 300).replace(/[.\s]+$/, '')}` : '';
   }
 
+  /** Waits until at least minIntervalMs after the START of the previous request (retries are requests too). */
   private async throttle(): Promise<void> {
-    const wait = this.lastCallAt + this.options.minIntervalMs - Date.now();
-    if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
-    this.lastCallAt = Date.now();
+    const wait = this.lastCallAt + this.options.minIntervalMs - this.options.clock.now();
+    if (wait > 0) await this.options.clock.sleep(wait);
   }
 
   /** Removes the key, and anything shaped like a Google API key, from text that may be shown or stored. */

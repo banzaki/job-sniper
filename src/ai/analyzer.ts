@@ -47,6 +47,8 @@ export function analysisVersionFor(candidate: CandidateProfile): string {
 export interface AnalyzerStats {
   /** HTTP requests attempted so far (retries included). */
   requests: number;
+  /** Of those requests, how many were the single retry of a transient failure. */
+  retries: number;
   /** HTTP status of the most recent response, or null when none arrived. */
   lastStatus: number | null;
 }

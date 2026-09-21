@@ -3,18 +3,19 @@ import type { Opportunity, OpportunityKey } from '../domain/opportunity.js';
 import { evaluateOpportunity } from '../filter/opportunity-filter.js';
 import type { InterestProfile } from '../profile/interest-profile.js';
 import type { ListingPage, OpportunitySource } from '../sources/opportunity-source.js';
-import { SourceBlockedError } from '../sources/source-errors.js';
+import { SourceBlockedError, SourceNotFoundError } from '../sources/source-errors.js';
 import type { OpportunityStore } from '../storage/opportunity-store.js';
+import type { QueueCounts, QueueRow } from '../storage/queue-store.js';
 
 export interface PipelineOptions {
   source: OpportunitySource;
   store: OpportunityStore;
   profile: InterestProfile;
-  /** Upper bound on detail requests per run; the rest of the unseen items wait for the next run. */
+  /** Most detail requests per run, shared between new and older pending items (see splitDetailBudget). */
   maxDetailsPerRun: number;
   /** Most listing pages read per run, starting from the newest. */
   maxPages: number;
-  /** Stop paginating once this many unseen opportunities were collected. */
+  /** Stop paginating once this many NEW summaries (unknown to the database and the queue) were saved. */
   targetNew: number;
   now?: () => Date;
 }
@@ -33,17 +34,29 @@ export interface ProcessedOpportunity {
   filter: FilterResult;
 }
 
+/**
+ * Counts are disjoint groups, never overlapping subsets:
+ *   discovered = alreadyKnown + newSummaries + alreadyQueued
+ *   detailsAttempted = detailsObtained + detailsFailed + detailsUnavailable
+ */
 export interface PipelineReport {
   pagesScanned: number;
-  /** Distinct summaries seen across all scanned pages. */
+  /** Distinct summaries seen on the scanned pages. */
   discovered: number;
+  /** Summaries whose opportunity (detail) is already stored. */
   alreadyKnown: number;
-  /** Unseen summaries collected, newest first. */
-  unseenCollected: number;
-  /** Unseen items left for a later run because of maxDetailsPerRun. Not persisted, not duplicates. */
-  deferred: number;
-  detailsRequested: number;
-  persisted: number;
+  /** Summaries seen for the first time, saved to the queue before any detail request. */
+  newSummaries: number;
+  /** Summaries that were already in the queue (detail still pending, or unavailable). */
+  alreadyQueued: number;
+  detailsAttempted: number;
+  detailsObtained: number;
+  /** Attempts that failed but keep the item pending (temporary errors, or a first not-found answer). */
+  detailsFailed: number;
+  /** Items that this run proved unavailable (repeated not-found). */
+  detailsUnavailable: number;
+  /** Queue state after the run. */
+  queue: QueueCounts;
   decisions: Record<FilterDecision, number>;
   failures: { externalId: string; message: string }[];
   stopReason: StopReason;
@@ -55,17 +68,27 @@ export interface PipelineReport {
 }
 
 /**
- * Discovery, one listing page at a time and newest first:
- *   page -> known? (database) -> collect unseen -> next page only while more unseen are needed.
- * Then details are requested for unseen items only, normalized (by the source), filtered and
- * persisted. Known items are never fetched again, only marked as seen.
+ * How the detail budget is shared: half (rounded down) is reserved for OLDER pending items, oldest first, so
+ * the old queue advances even when new items keep arriving; the rest goes to NEW items in scan order (newest
+ * first). Whatever one group cannot use goes to the other. Items in backoff are not considered.
+ */
+export function splitDetailBudget<T>(budget: number, fresh: readonly T[], older: readonly T[]): T[] {
+  const reservedOld = Math.min(Math.floor(budget / 2), older.length);
+  const takeFresh = Math.min(budget - reservedOld, fresh.length);
+  const takeOlder = Math.min(budget - takeFresh, older.length);
+  return [...fresh.slice(0, takeFresh), ...older.slice(0, takeOlder)];
+}
+
+/**
+ * Discovery, one listing page at a time and newest first. Every valid summary of a downloaded page is saved
+ * to the persistent queue BEFORE any detail is requested, so nothing is lost when a page scrolls away or the
+ * process stops. Pagination stops at the first of: new-summary target, page limit, end of the source, a page
+ * with nothing new to this run, a cursor that makes no progress, or a source error/block.
  *
- * Pagination stops as soon as the unseen target is reached, the page limit is reached, the
- * source runs out, a page brings nothing new to this run, the cursor makes no progress, or the
- * source fails. Not finding shortlist material is never a reason to keep going.
- *
- * A new item is persisted only after its detail was fetched and filtered, so a failure leaves
- * nothing half-written and the item is simply unseen again on the next run.
+ * Then details are fetched for pending queue items (new and older, see splitDetailBudget), normalized by the
+ * source, filtered and persisted; an item is "done" only after its opportunity is stored. Known opportunities
+ * are never fetched again. Temporary failures keep the item pending with a retry delay; repeated "not found"
+ * answers mark it unavailable with the reason.
  */
 export async function runPipeline(options: PipelineOptions): Promise<PipelineReport> {
   const { source, store, profile, maxDetailsPerRun, maxPages, targetNew } = options;
@@ -75,10 +98,13 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRep
     pagesScanned: 0,
     discovered: 0,
     alreadyKnown: 0,
-    unseenCollected: 0,
-    deferred: 0,
-    detailsRequested: 0,
-    persisted: 0,
+    newSummaries: 0,
+    alreadyQueued: 0,
+    detailsAttempted: 0,
+    detailsObtained: 0,
+    detailsFailed: 0,
+    detailsUnavailable: 0,
+    queue: { pending: 0, done: 0, unavailable: 0 },
     decisions: { shortlist: 0, review: 0, skip: 0 },
     failures: [],
     stopReason: 'source-exhausted',
@@ -87,9 +113,9 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRep
     processed: [],
   };
 
-  const seenAt = now().toISOString();
+  const runStartedAt = now().toISOString();
   const known: OpportunityKey[] = [];
-  const unseen: OpportunityKey[] = [];
+  const newInScanOrder: OpportunityKey[] = [];
   const visited = new Set<string>();
   const requestedCursors = new Set<string>();
   let cursor: string | null = null;
@@ -125,14 +151,27 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRep
       report.stopReason = 'repeated-page';
       break;
     }
-    for (const summary of fresh) {
-      visited.add(idOf(summary));
-      report.discovered += 1;
-      const key = { sourceId: summary.sourceId, externalId: summary.externalId };
-      (store.has(key) ? known : unseen).push(key);
-    }
+    // All valid summaries of a downloaded page are saved, even when the page overshoots the target.
+    store.batch(() => {
+      for (const summary of fresh) {
+        visited.add(idOf(summary));
+        report.discovered += 1;
+        const key = { sourceId: summary.sourceId, externalId: summary.externalId };
+        if (store.has(key)) {
+          known.push(key);
+          report.alreadyKnown += 1;
+          continue;
+        }
+        if (store.queue.upsertDiscovered(summary, runStartedAt).isNew) {
+          newInScanOrder.push(key);
+          report.newSummaries += 1;
+        } else {
+          report.alreadyQueued += 1;
+        }
+      }
+    });
 
-    if (unseen.length >= targetNew) {
+    if (report.newSummaries >= targetNew) {
       report.stopReason = 'target-new-reached';
       break;
     }
@@ -151,39 +190,58 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRep
     cursor = page.nextCursor;
   }
 
-  report.alreadyKnown = known.length;
-  report.unseenCollected = unseen.length;
-  store.touchSeen(known, seenAt);
+  store.touchSeen(known, runStartedAt);
 
   // A blocked source would refuse detail requests too: no further requests at all.
-  if (report.aborted) {
-    report.deferred = unseen.length;
-    return report;
+  if (!report.aborted) {
+    await fetchDetails({ source, store, profile, maxDetailsPerRun, now, report, runStartedAt, newInScanOrder });
   }
 
-  const batch = unseen.slice(0, maxDetailsPerRun);
-  report.deferred = unseen.length - batch.length;
+  report.queue = store.queue.counts();
+  return report;
+}
 
-  for (const key of batch) {
-    report.detailsRequested += 1;
+async function fetchDetails(context: {
+  source: OpportunitySource;
+  store: OpportunityStore;
+  profile: InterestProfile;
+  maxDetailsPerRun: number;
+  now: () => Date;
+  report: PipelineReport;
+  runStartedAt: string;
+  newInScanOrder: readonly OpportunityKey[];
+}): Promise<void> {
+  const { source, store, profile, report, runStartedAt } = context;
+
+  const due = store.queue.listPending(context.now().toISOString());
+  const byId = new Map(due.map((row) => [idOf(row.key), row]));
+  const fresh = context.newInScanOrder.map((key) => byId.get(idOf(key))).filter((row): row is QueueRow => row !== undefined);
+  const freshIds = new Set(fresh.map((row) => idOf(row.key)));
+  const older = due.filter((row) => !freshIds.has(idOf(row.key)) && row.firstDiscoveredAt < runStartedAt);
+
+  for (const row of splitDetailBudget(context.maxDetailsPerRun, fresh, older)) {
+    report.detailsAttempted += 1;
+    const at = context.now().toISOString();
     try {
-      const opportunity = await source.fetchDetail(key.externalId);
-      const filter = evaluateOpportunity(opportunity, profile, now());
-      store.insert(opportunity, filter, seenAt);
-      report.persisted += 1;
+      const opportunity = await source.fetchDetail(row.key.externalId);
+      const filter = evaluateOpportunity(opportunity, profile, context.now());
+      store.persistDetail(opportunity, filter, at);
+      report.detailsObtained += 1;
       report.decisions[filter.decision] += 1;
       report.processed.push({ opportunity, filter });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      report.failures.push({ externalId: key.externalId, message });
       if (error instanceof SourceBlockedError) {
+        report.detailsAttempted -= 1; // a block is not a failure of this item
         report.aborted = message;
-        break;
+        return;
       }
+      const updated = store.queue.recordFailure(row.key, { at, message, notFound: error instanceof SourceNotFoundError });
+      if (updated?.state === 'unavailable') report.detailsUnavailable += 1;
+      else report.detailsFailed += 1;
+      report.failures.push({ externalId: row.key.externalId, message });
     }
   }
-
-  return report;
 }
 
 function idOf(summary: { sourceId: string; externalId: string }): string {

@@ -37,6 +37,8 @@ CREATE INDEX IF NOT EXISTS idx_analyses_version_status ON analyses (analysis_ver
 `;
 
 const MAX_ERROR_LENGTH = 500;
+/** A failed analysis is retried automatically at most this many times; after that it stays visible as failed. */
+export const MAX_ANALYSIS_ATTEMPTS = 3;
 
 export interface StoredAnalysis {
   analysis: MatchAnalysis;
@@ -65,11 +67,15 @@ export interface AnalysisSelection {
 }
 
 export interface AnalysisCounts {
-  /** Open opportunities without a successful analysis for the version (failed attempts included). */
+  /** Open opportunities the next automatic run may analyze (see select). */
   pending: number;
   success: number;
-  /** Opportunities whose attempts all failed so far. */
+  /** Opportunities whose attempts all failed so far (a subset of them may be exhausted). */
   failed: number;
+  /** Failed opportunities that reached the automatic attempt limit: visible, but no longer picked automatically. */
+  exhausted: number;
+  /** Open opportunities without an analysis that the basic filter skipped: stored, outside automatic analysis. */
+  keptAside: number;
 }
 
 export class AnalysisDataError extends Error {
@@ -128,37 +134,82 @@ export class AnalysisStore {
   }
 
   /**
-   * Open opportunities that still need an analysis for `version`, newest first (by publication time,
-   * falling back to when they were first seen). Cancelled, closed and unknown-status ones are never
-   * selected, even when forced. `force` includes ones already analyzed.
+   * Which open opportunities to analyze next for `version`. Cancelled, closed and unknown-status ones are never
+   * selected, even when forced. `force` includes ones already analyzed; `only` picks exactly one opportunity
+   * (allowed even for a basic-filter skip, to review a discard on purpose).
+   *
+   * Automatic selection (no `only`) is prioritized:
+   *  1. only basic-filter "shortlist" and "review" (a basic skip stays stored, outside automatic analysis; it is
+   *     unrelated to the AI's own "skip" conclusion);
+   *  2. opportunities never attempted before those that failed earlier, and none that already failed
+   *     MAX_ANALYSIS_ATTEMPTS times (so the same rejections cannot monopolize batches; they stay visible as failed);
+   *  3. shortlist before review, then with matched keywords before without;
+   *  4. inside each group, alternating the most recent with the one waiting longest, so old items advance too.
+   * Category, premium access or unverified competence never exclude anything by themselves.
    */
   select(version: string, options: { limit: number; force?: boolean; only?: OpportunityKey }): AnalysisSelection {
-    const force = options.force ? 1 : 0;
-    const onlyClause = options.only ? 'AND o.source_id = ? AND o.external_id = ?' : '';
-    const where = `
-      FROM opportunities o
-      WHERE o.status = 'open'
-        AND (? = 1 OR NOT EXISTS (
-          SELECT 1 FROM analyses a
-          WHERE a.source_id = o.source_id AND a.external_id = o.external_id
-            AND a.analysis_version = ? AND a.status = 'success'))
-        ${onlyClause}`;
-    const params: (string | number)[] = [force, version];
-    if (options.only) params.push(options.only.sourceId, options.only.externalId);
-
-    const total = this.db.prepare(`SELECT COUNT(*) AS total ${where}`).get(...params)?.total;
+    const params: (string | number)[] = [version, options.force ? 1 : 0];
+    const conditions = [`o.status = 'open'`, `(? = 1 OR a.status IS NULL OR a.status <> 'success')`];
+    if (options.only) {
+      conditions.push('o.source_id = ? AND o.external_id = ?');
+      params.push(options.only.sourceId, options.only.externalId);
+    } else {
+      conditions.push(`o.filter_decision IN ('shortlist', 'review')`);
+      // Written without NOT(...) on purpose: a never-analyzed row has NULLs there, and NOT(NULL) would drop it.
+      conditions.push(`(a.status IS NULL OR a.status <> 'failed' OR a.attempts < ${MAX_ANALYSIS_ATTEMPTS})`);
+    }
+    // The version is bound as a parameter; only constants are interpolated into the SQL text.
     const rows = this.db
       .prepare(
-        `SELECT o.source_id, o.external_id ${where}
-         ORDER BY COALESCE(json_extract(o.payload_json, '$.publishedAt'), o.first_seen_at) DESC, o.id DESC
-         LIMIT ?`,
+        `SELECT o.source_id, o.external_id, o.filter_decision, o.filter_keywords_json, o.first_seen_at,
+                COALESCE(json_extract(o.payload_json, '$.publishedAt'), o.first_seen_at) AS recency,
+                a.status AS analysis_status
+         FROM opportunities o
+         LEFT JOIN analyses a
+           ON a.source_id = o.source_id AND a.external_id = o.external_id AND a.analysis_version = ?
+         WHERE ${conditions.join(' AND ')}`,
       )
-      .all(...params, options.limit);
+      .all(...params);
 
-    return {
-      keys: rows.map((row) => ({ sourceId: text(row, 'source_id'), externalId: text(row, 'external_id') })),
-      totalEligible: typeof total === 'number' ? total : 0,
-    };
+    interface Candidate {
+      key: OpportunityKey;
+      group: string;
+      recency: string;
+      firstSeen: string;
+    }
+    const candidates: Candidate[] = rows.map((row) => {
+      const decision = text(row, 'filter_decision');
+      const keywords = JSON.parse(text(row, 'filter_keywords_json')) as unknown;
+      const hasKeywords = Array.isArray(keywords) && keywords.length > 0;
+      const attempted = row.analysis_status === 'failed' ? 1 : 0;
+      const tier = decision === 'shortlist' ? 0 : decision === 'review' ? 1 : 2;
+      return {
+        key: { sourceId: text(row, 'source_id'), externalId: text(row, 'external_id') },
+        group: `${attempted}${tier}${hasKeywords ? 0 : 1}`,
+        recency: text(row, 'recency'),
+        firstSeen: text(row, 'first_seen_at'),
+      };
+    });
+
+    const groups = [...new Set(candidates.map((candidate) => candidate.group))].sort();
+    const ordered: OpportunityKey[] = [];
+    for (const group of groups) {
+      const members = candidates.filter((candidate) => candidate.group === group);
+      const recent = [...members].sort((a, b) => b.recency.localeCompare(a.recency) || b.key.externalId.localeCompare(a.key.externalId));
+      const waiting = [...members].sort((a, b) => a.firstSeen.localeCompare(b.firstSeen) || a.key.externalId.localeCompare(b.key.externalId));
+      const taken = new Set<string>();
+      for (let index = 0; index < members.length; index += 1) {
+        for (const list of [recent, waiting]) {
+          const next = list.find((candidate) => !taken.has(opportunityId(candidate.key)));
+          if (next) {
+            taken.add(opportunityId(next.key));
+            ordered.push(next.key);
+          }
+        }
+        if (taken.size === members.length) break;
+      }
+    }
+    return { keys: ordered.slice(0, options.limit), totalEligible: ordered.length };
   }
 
   /**
@@ -282,6 +333,15 @@ export class AnalysisStore {
       pending,
       success: one(`SELECT COUNT(*) AS total FROM analyses WHERE analysis_version = ? AND status = 'success'`),
       failed: one(`SELECT COUNT(*) AS total FROM analyses WHERE analysis_version = ? AND status = 'failed'`),
+      exhausted: one(
+        `SELECT COUNT(*) AS total FROM analyses WHERE analysis_version = ? AND status = 'failed' AND attempts >= ${MAX_ANALYSIS_ATTEMPTS}`,
+      ),
+      keptAside: one(
+        `SELECT COUNT(*) AS total FROM opportunities o
+         WHERE o.status = 'open' AND o.filter_decision = 'skip'
+           AND NOT EXISTS (SELECT 1 FROM analyses a WHERE a.source_id = o.source_id AND a.external_id = o.external_id
+                           AND a.analysis_version = ? AND a.status = 'success')`,
+      ),
     };
   }
 

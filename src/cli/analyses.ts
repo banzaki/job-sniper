@@ -1,10 +1,11 @@
 import { ANALYSIS_VERSION } from '../ai/current-version.js';
 import { ConfigError, loadAppConfig } from '../config.js';
 import type { MatchAnalysis } from '../domain/match-analysis.js';
-import { formatAnalysisMessage } from '../notify/format-message.js';
+import { renderAnalysisMessage } from '../notify/present.js';
+import { brunoCandidate } from '../profile/bruno-candidate.js';
 import { OpportunityStore } from '../storage/opportunity-store.js';
 
-const USAGE = 'Usage: npm run analyses -- [--proposals] [--messages]';
+const USAGE = 'Usage: npm run analyses -- [--details] [--proposals] [--messages]';
 const GROUPS: readonly MatchAnalysis['recommendation'][] = ['apply', 'wait', 'review', 'skip'];
 const SOURCE_LABELS = { '99freelas': '99Freelas' };
 
@@ -12,7 +13,7 @@ const SOURCE_LABELS = { '99freelas': '99Freelas' };
 function main(): number {
   const flags = new Set(process.argv.slice(2));
   for (const flag of flags) {
-    if (flag !== '--proposals' && flag !== '--messages') throw new ConfigError(`Unknown argument "${flag}". ${USAGE}`);
+    if (flag !== '--details' && flag !== '--proposals' && flag !== '--messages') throw new ConfigError(`Unknown argument "${flag}". ${USAGE}`);
   }
   const config = loadAppConfig();
   const store = new OpportunityStore(config.databasePath);
@@ -21,7 +22,8 @@ function main(): number {
     const counts = store.analyses.counts(ANALYSIS_VERSION);
     console.log(
       `database: ${config.databasePath} | analysis version ${ANALYSIS_VERSION} | ` +
-        `success=${counts.success} failed=${counts.failed} pending=${counts.pending}`,
+        `success=${counts.success} failed=${counts.failed} (exhausted ${counts.exhausted}) pending=${counts.pending} | ` +
+        `basic-skip kept aside=${counts.keptAside}`,
     );
     console.log(
       `superseded (earlier prompt/profile, kept as history, not for use): ${store.analyses.countSuperseded(ANALYSIS_VERSION)}` +
@@ -51,12 +53,19 @@ function main(): number {
         );
         console.log(`    fit     : ${analysis.technicalFit}`);
         if (opportunity) console.log(`    url     : ${opportunity.opportunity.url}`);
+        if (flags.has('--details')) printDetails(analysis);
         if (flags.has('--proposals')) console.log(`    proposal (${analysis.proposal.language}, ${analysis.proposal.status}):\n${indent(analysis.proposal.text)}`);
         if (flags.has('--messages') && opportunity) {
+          const message = renderAnalysisMessage({
+            opportunity: opportunity.opportunity,
+            analysis,
+            candidate: brunoCandidate,
+            mode: notifiedAt ? 'update' : 'enriched',
+            sourceLabels: SOURCE_LABELS,
+            now: new Date(),
+          });
           console.log('    --- Telegram message (rendered, not sent) ---');
-          console.log(
-            indent(formatAnalysisMessage(opportunity.opportunity, opportunity.filter, analysis, notifiedAt ? 'update' : 'enriched', { sourceLabels: SOURCE_LABELS })),
-          );
+          console.log(indent(message.text));
         }
       }
     }
@@ -71,6 +80,17 @@ function main(): number {
   } finally {
     store.close();
   }
+}
+
+/** The complete stored analysis: what the compact Telegram message leaves out. */
+function printDetails(analysis: MatchAnalysis): void {
+  const verification = analysis.verification;
+  console.log(`    skills  : essential [${verification.essential.join(', ')}] | confirmed [${verification.confirmed.join(', ')}] | unverified [${verification.unverified.join(', ')}] | learning [${verification.learning.join(', ')}] | not covered [${verification.notCovered.join(', ')}]`);
+  if (analysis.matchedSkills.length > 0) console.log(`    matched : ${analysis.matchedSkills.join(', ')}`);
+  if (analysis.missingSkills.length > 0) console.log(`    missing : ${analysis.missingSkills.join(', ')}`);
+  for (const risk of analysis.risks) console.log(`    risk    : ${risk}`);
+  analysis.clientQuestions.forEach((question, index) => console.log(`    question ${index + 1}: ${question}`));
+  console.log(`    price   : ${analysis.price.rationale}`);
 }
 
 function indent(text: string): string {

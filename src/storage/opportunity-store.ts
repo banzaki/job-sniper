@@ -10,9 +10,17 @@ import {
   type OpportunityKey,
 } from '../domain/opportunity.js';
 import { ANALYSIS_SCHEMA, AnalysisStore } from './analysis-store.js';
+import { runInTransaction } from './db-util.js';
+import { DeliveryStore } from './delivery-store.js';
+import { QueueStore } from './queue-store.js';
+import { QuotaStore } from './quota-store.js';
+import { SCHEMA_V3 } from './schema-v3.js';
 
-/** 1: opportunities. 2: adds analyses and proposal_drafts (opportunity rows are never touched). */
-const SCHEMA_VERSION = 2;
+/**
+ * 1: opportunities. 2: adds analyses and proposal_drafts. 3: adds the discovery queue, multi-part deliveries,
+ * quota accounting and run locks. Upgrades only add tables: existing rows are never touched.
+ */
+const SCHEMA_VERSION = 3;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS opportunities (
@@ -63,6 +71,12 @@ export class OpportunityStore {
   private readonly markNotifiedStatement: StatementSync;
   /** AI analyses and proposal drafts, on the same connection. */
   readonly analyses: AnalysisStore;
+  /** Discovered summaries waiting for their detail. */
+  readonly queue: QueueStore;
+  /** Multi-part message deliveries and their confirmations. */
+  readonly deliveries: DeliveryStore;
+  /** Request accounting, cooldowns and locks for the AI provider. */
+  readonly quota: QuotaStore;
 
   /** Opens (creating the folder and file when missing) the database at `path`. */
   constructor(path: string) {
@@ -73,6 +87,9 @@ export class OpportunityStore {
     try {
       this.migrate(path);
       this.analyses = new AnalysisStore(this.db);
+      this.queue = new QueueStore(this.db);
+      this.deliveries = new DeliveryStore(this.db);
+      this.quota = new QuotaStore(this.db);
       this.hasStatement = this.db.prepare(
         'SELECT 1 AS present FROM opportunities WHERE source_id = ? AND external_id = ?',
       );
@@ -139,6 +156,22 @@ export class OpportunityStore {
       filter.evaluatedAt,
       filter.ruleVersion,
     );
+  }
+
+  /** Runs `work` in one transaction (all-or-nothing). Not re-entrant. */
+  batch<T>(work: () => T): T {
+    return runInTransaction(this.db, work);
+  }
+
+  /**
+   * Stores an opportunity whose detail was just obtained AND marks its queue item done, in one transaction:
+   * a detail counts as obtained only after the opportunity is persisted. Also fine when no queue item exists.
+   */
+  persistDetail(opportunity: Opportunity, filter: FilterResult, seenAt: string): void {
+    this.transaction(() => {
+      this.insert(opportunity, filter, seenAt);
+      this.queue.markDone(opportunity, seenAt);
+    });
   }
 
   get(key: OpportunityKey): StoredOpportunity | null {
@@ -267,8 +300,8 @@ export class OpportunityStore {
 
   /**
    * Brings the database to SCHEMA_VERSION. Every statement is CREATE ... IF NOT EXISTS, so it is safe to
-   * repeat and it never modifies existing opportunity rows. An existing version-1 file is copied once
-   * (next to it, as "<name>.pre-v2.<ext>") before the first upgrade.
+   * repeat and it never modifies existing rows. An existing older file is copied once before its upgrade
+   * (next to it, as "<name>.pre-v<target>.<ext>", which the .gitignore rules for database files cover).
    */
   private migrate(path: string): void {
     const row = this.db.prepare('PRAGMA user_version').get();
@@ -278,14 +311,15 @@ export class OpportunityStore {
         `Database schema version ${version} is newer than this program supports (${SCHEMA_VERSION}).`,
       );
     }
-    if (version === 1 && path !== ':memory:') {
+    if (version >= 1 && version < SCHEMA_VERSION && path !== ':memory:') {
       const extension = extname(path);
-      const backup = join(dirname(path), `${basename(path, extension)}.pre-v2${extension}`);
+      const backup = join(dirname(path), `${basename(path, extension)}.pre-v${SCHEMA_VERSION}${extension}`);
       if (!existsSync(backup)) copyFileSync(path, backup, constants.COPYFILE_EXCL);
     }
     this.transaction(() => {
       this.db.exec(SCHEMA);
       this.db.exec(ANALYSIS_SCHEMA);
+      this.db.exec(SCHEMA_V3);
     });
     if (version < SCHEMA_VERSION) {
       this.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);

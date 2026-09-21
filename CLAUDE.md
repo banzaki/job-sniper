@@ -38,9 +38,25 @@
 Code, identifiers, comments, filenames, commit messages and UI text are in
 English.
 
+**One exception (SPEC 005):** the text of the Telegram messages sent to the owner is in Brazilian Portuguese
+(`src/notify/`). Nothing else changes: code, identifiers, comments, filenames, commit messages, logs and
+terminal reports stay in English.
+
+## Operational limits
+
+- Gemini free tier: at least 15 s between request starts (retries included), a persisted daily counter
+  (default 20 per model) reserved before each call, a stored cooldown after HTTP 429. Never bypass these,
+  never add a fallback model or provider, and never call Gemini in acceptance or tests without explicit authorization.
+- A Telegram delivery is marked complete only when every part is confirmed. Never re-send history because
+  the presentation changed. Ambiguous confirmations are recorded and reported, never hidden.
+- A real database is migrated only after the migration was validated on a copy; the automatic
+  `<name>.pre-v<N>.db` backup is never deleted by the program.
+
 ## Commands
 
-- `npm run dev` — run with tsx
+- `npm run dev` — run with tsx (collect, AI if enabled, notify)
+- `npm run collect` — discovery and details only
+- `npm run notify:demo -- --id <id>` — one demonstration delivery of a saved analysis
 - `npm run typecheck` — type-check
 - `npm run build` — compile to `dist/`
 - `npm run start` — run compiled output

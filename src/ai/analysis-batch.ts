@@ -9,6 +9,7 @@ import {
   AnalysisRejectedError,
   AnalysisUnavailableError,
 } from './errors.js';
+import { cooldownFor } from './quota.js';
 
 /** Consecutive provider outages after which the batch gives up (each one already had its retry). */
 const MAX_CONSECUTIVE_UNAVAILABLE = 3;
@@ -38,6 +39,10 @@ export interface AnalysisBatchReport {
   leftPending: number;
   stopReason: BatchStopReason;
   stopDetail: string | null;
+  /** When a provider quota refusal set a pause, until when (ISO). */
+  cooldownUntil: string | null;
+  /** HTTP requests made by the analyzer during this batch, and how many of them were the single retry. */
+  requests: { total: number; retries: number };
   failures: { id: string; message: string }[];
   analyses: MatchAnalysis[];
 }
@@ -79,9 +84,13 @@ export async function runAnalysisBatch(options: AnalysisBatchOptions): Promise<A
     leftPending: eligible,
     stopReason: 'completed',
     stopDetail: null,
+    cooldownUntil: null,
+    requests: { total: 0, retries: 0 },
     failures: [],
     analyses: [],
   };
+  const startRequests = analyzer.stats?.requests ?? 0;
+  const startRetries = analyzer.stats?.retries ?? 0;
 
   let consecutiveUnavailable = 0;
   for (const key of keys) {
@@ -103,6 +112,13 @@ export async function runAnalysisBatch(options: AnalysisBatchOptions): Promise<A
         report.attempted -= 1;
         report.stopReason = 'quota-exhausted';
         report.stopDetail = message;
+        if (!error.local) {
+          // A provider refusal: pause for the period the evidence supports, and keep the pause across restarts.
+          const info = error.info ?? { kind: 'unknown' as const, retryAfterSeconds: null, evidence: [] };
+          const pause = cooldownFor(info, now());
+          store.quota.setCooldown(analyzer.id, analyzer.model, pause.until.toISOString(), pause.kind, pause.reason, now().toISOString());
+          report.cooldownUntil = pause.until.toISOString();
+        }
         break;
       }
       if (error instanceof AnalysisRejectedError) {
@@ -137,5 +153,9 @@ export async function runAnalysisBatch(options: AnalysisBatchOptions): Promise<A
   }
 
   report.leftPending = Math.max(0, eligible - report.succeeded);
+  report.requests = {
+    total: (analyzer.stats?.requests ?? 0) - startRequests,
+    retries: (analyzer.stats?.retries ?? 0) - startRetries,
+  };
   return report;
 }

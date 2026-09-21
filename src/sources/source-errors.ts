@@ -6,6 +6,14 @@ export class SourceBlockedError extends Error {
   }
 }
 
+/** The source says the item does not exist or is not accessible (HTTP 404/410 or its "cannot access" page). */
+export class SourceNotFoundError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SourceNotFoundError';
+  }
+}
+
 /** The source answered, but not with something usable (bad status, wrong content, changed markup). */
 export class SourceResponseError extends Error {
   constructor(message: string) {

@@ -1,7 +1,8 @@
-import { planAnalyses, runAnalysisBatch } from '../ai/analysis-batch.js';
+import { runAiStage } from '../ai/ai-stage.js';
+import { planAnalyses } from '../ai/analysis-batch.js';
 import { createAnalyzer } from '../ai/create-analyzer.js';
 import { ANALYSIS_VERSION } from '../ai/current-version.js';
-import { describeBatch, describePlan } from '../ai/format-report.js';
+import { describePlan, describeQuotaUsage, describeStage } from '../ai/format-report.js';
 import { ConfigError, loadAiConfig, loadAppConfig } from '../config.js';
 import type { OpportunityKey } from '../domain/opportunity.js';
 import { brunoCandidate } from '../profile/bruno-candidate.js';
@@ -37,7 +38,10 @@ function parseArgs(argv: readonly string[]): Args {
   return args;
 }
 
-/** Analyzes pending open opportunities with the configured AI provider. Does not touch the source site. */
+/**
+ * Analyzes pending opportunities with the configured AI provider. It does not touch the source site and does not
+ * notify. Every request passes the quota gate; an active pause or another running AI step ends it without a request.
+ */
 async function main(): Promise<number> {
   const args = parseArgs(process.argv.slice(2));
   const config = loadAppConfig();
@@ -62,16 +66,18 @@ async function main(): Promise<number> {
       return 0;
     }
 
-    const analyzer = createAnalyzer(ai);
-    const report = await runAnalysisBatch({ store, analyzer, candidate: brunoCandidate, ...selection });
-    for (const line of describeBatch(report, analyzer.id, analyzer.model)) console.log(line);
-    if (analyzer.stats) {
-      console.log(`http requests to ${analyzer.id}: ${analyzer.stats.requests} | last status: ${analyzer.stats.lastStatus ?? 'none'}`);
-    }
+    const analyzer = createAnalyzer(ai, store);
+    const stage = await runAiStage({ store, analyzer, candidate: brunoCandidate, ...selection });
+    for (const line of describeStage(stage, analyzer.id, analyzer.model)) console.log(line);
 
     const counts = store.analyses.counts(ANALYSIS_VERSION);
-    console.log(`totals for ${ANALYSIS_VERSION}: success=${counts.success} failed=${counts.failed} pending=${counts.pending}`);
-    return report.stopReason !== 'completed' || report.failed > 0 ? 1 : 0;
+    console.log(
+      `totals for ${ANALYSIS_VERSION}: success=${counts.success} failed=${counts.failed} (exhausted ${counts.exhausted}) ` +
+        `pending=${counts.pending} | basic-skip kept aside=${counts.keptAside}`,
+    );
+    for (const line of describeQuotaUsage(store, analyzer.id, analyzer.model, ai.maxRequestsPerDay, new Date())) console.log(line);
+    if (stage.status !== 'ran') return 1;
+    return stage.batch.stopReason !== 'completed' || stage.batch.failed > 0 ? 1 : 0;
   } finally {
     store.close();
   }

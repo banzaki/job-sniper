@@ -150,12 +150,12 @@ test('a proposal that breaks the truthfulness rules is rejected even when the JS
 
 test('stats expose the request count and the last HTTP status, never headers or the key', async () => {
   const { analyzer } = analyzerWith([() => json(503, { error: { message: 'busy.' } }), () => json(503, { error: { message: 'busy.' } })]);
-  assert.deepEqual({ ...analyzer.stats }, { requests: 0, lastStatus: null });
+  assert.deepEqual({ ...analyzer.stats }, { requests: 0, retries: 0, lastStatus: null });
   await assert.rejects(analyzer.analyze(input()), (error: unknown) => error instanceof AnalysisUnavailableError && /\(HTTP 503\): busy\.$/.test((error as Error).message));
-  assert.deepEqual({ ...analyzer.stats }, { requests: 2, lastStatus: 503 });
+  assert.deepEqual({ ...analyzer.stats }, { requests: 2, retries: 1, lastStatus: 503 });
 
   const ok = analyzerWith([() => json(200, okBody(goodText()))]);
   await ok.analyzer.analyze(input());
-  assert.deepEqual({ ...ok.analyzer.stats }, { requests: 1, lastStatus: 200 });
+  assert.deepEqual({ ...ok.analyzer.stats }, { requests: 1, retries: 0, lastStatus: 200 });
   assert.ok(!JSON.stringify(ok.analyzer.stats).includes(KEY));
 });

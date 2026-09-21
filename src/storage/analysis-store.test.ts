@@ -52,9 +52,11 @@ test('migration from a version-1 database preserves every opportunity, first_see
   store.close();
 
   const check = new DatabaseSync(path, { readOnly: true });
-  assert.equal(check.prepare('PRAGMA user_version').get()?.user_version, 2);
+  assert.equal(check.prepare('PRAGMA user_version').get()?.user_version, 3);
   const tables = check.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => row.name);
-  assert.ok(tables.includes('analyses') && tables.includes('proposal_drafts') && tables.includes('opportunities'));
+  for (const table of ['opportunities', 'analyses', 'proposal_drafts', 'discovery_queue', 'deliveries', 'delivery_parts', 'quota_usage', 'quota_state', 'run_locks']) {
+    assert.ok(tables.includes(table), table);
+  }
   check.close();
 });
 
@@ -63,7 +65,7 @@ test('the first upgrade leaves a copy of the version-1 file next to it', () => {
   createVersion1Database(path);
   new OpportunityStore(path).close();
 
-  const backup = join(workDir, 'backup.pre-v2.db');
+  const backup = join(workDir, 'backup.pre-v3.db');
   assert.ok(existsSync(backup));
   const copy = new DatabaseSync(backup, { readOnly: true });
   assert.equal(copy.prepare('SELECT COUNT(*) AS n FROM opportunities').get()?.n, 3);
@@ -85,7 +87,7 @@ test('the migration is idempotent: reopening changes nothing and never overwrite
     assert.equal(again.analyses.counts(ANALYSIS_VERSION).success, 1, 'analyses survive reopening');
     again.close();
   }
-  const backup = new DatabaseSync(join(workDir, 'idempotent.pre-v2.db'), { readOnly: true });
+  const backup = new DatabaseSync(join(workDir, 'idempotent.pre-v3.db'), { readOnly: true });
   assert.equal(backup.prepare('PRAGMA user_version').get()?.user_version, 1, 'the backup is the untouched original');
   backup.close();
 });
@@ -107,9 +109,9 @@ test('a fresh database is created at version 2 with no backup', () => {
   const store = new OpportunityStore(path);
   store.insert(makeOpportunity('1'), makeFilter(), '2026-05-01T00:00:00.000Z');
   store.close();
-  assert.ok(!existsSync(join(workDir, 'fresh', 'nested', 'new.pre-v2.db')));
+  assert.ok(!existsSync(join(workDir, 'fresh', 'nested', 'new.pre-v3.db')));
   const check = new DatabaseSync(path, { readOnly: true });
-  assert.equal(check.prepare('PRAGMA user_version').get()?.user_version, 2);
+  assert.equal(check.prepare('PRAGMA user_version').get()?.user_version, 3);
   check.close();
 });
 
@@ -137,7 +139,8 @@ test('failures are stored trimmed, counted per attempt, and queryable apart from
   const [row] = store.analyses.list(ANALYSIS_VERSION, 'failed');
   assert.equal(row?.attempts, 2);
   assert.equal(row?.errorMessage?.length, 500);
-  assert.deepEqual(store.analyses.counts(ANALYSIS_VERSION), { pending: 2, success: 0, failed: 1 });
+  const counts = store.analyses.counts(ANALYSIS_VERSION);
+  assert.deepEqual({ pending: counts.pending, success: counts.success, failed: counts.failed }, { pending: 2, success: 0, failed: 1 });
 });
 
 test('the proposal draft lives in its own table with its own status', () => {

@@ -1,4 +1,5 @@
-import { NotificationError, type Notifier } from './notifier.js';
+import { visibleLength } from './html.js';
+import { NotificationError, type Notifier, type SendOptions, type SendResult } from './notifier.js';
 
 const API_BASE = 'https://api.telegram.org';
 /** Telegram accepts at most 4096 characters per message. */
@@ -31,9 +32,11 @@ export class TelegramNotifier implements Notifier {
     this.options = { ...DEFAULT_OPTIONS, ...options };
   }
 
-  async send(text: string): Promise<void> {
-    if (text.length > TELEGRAM_MAX_MESSAGE_LENGTH) {
-      throw new NotificationError(`Message has ${text.length} characters; Telegram allows ${TELEGRAM_MAX_MESSAGE_LENGTH}.`);
+  async send(text: string, options: SendOptions = {}): Promise<SendResult> {
+    if (visibleLength(text) > TELEGRAM_MAX_MESSAGE_LENGTH) {
+      throw new NotificationError(
+        `Message has ${visibleLength(text)} characters; Telegram allows ${TELEGRAM_MAX_MESSAGE_LENGTH}.`,
+      );
     }
     await this.throttle();
 
@@ -47,15 +50,21 @@ export class TelegramNotifier implements Notifier {
           text,
           parse_mode: 'HTML',
           link_preview_options: { is_disabled: true },
+          ...(options.silent ? { disable_notification: true } : {}),
         }),
         signal: AbortSignal.timeout(this.options.timeoutMs),
       });
     } catch (error) {
+      // Timeout or a lost connection: the message may still have been delivered (ambiguous).
       if (error instanceof DOMException && error.name === 'TimeoutError') {
-        throw new NotificationError(`Telegram request timed out after ${this.options.timeoutMs}ms; delivery is unconfirmed.`);
+        throw new NotificationError(
+          `Telegram request timed out after ${this.options.timeoutMs}ms; delivery is unconfirmed.`,
+          false,
+          true,
+        );
       }
       const reason = error instanceof Error ? error.message : String(error);
-      throw new NotificationError(`Telegram request failed: ${this.scrub(reason)}`);
+      throw new NotificationError(`Telegram request failed: ${this.scrub(reason)}`, false, true);
     }
 
     const body = await response.json().catch(() => null);
@@ -65,8 +74,13 @@ export class TelegramNotifier implements Notifier {
       throw new NotificationError(
         `Telegram API refused the message (HTTP ${response.status}): ${this.scrub(description)}`,
         FATAL_STATUSES.has(response.status),
+        // A 2xx whose body could not be read leaves the delivery unconfirmed.
+        response.ok && body === null,
       );
     }
+    const result = isRecord(body) && isRecord(body.result) ? body.result : null;
+    const messageId = result && (typeof result.message_id === 'number' || typeof result.message_id === 'string') ? String(result.message_id) : null;
+    return { messageId };
   }
 
   private async throttle(): Promise<void> {

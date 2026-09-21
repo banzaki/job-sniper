@@ -11,44 +11,59 @@ a common contract, so the core never depends on a specific website.
 
 ## Pipeline
 
-1. **Collect** — list recent opportunities from a source (`OpportunitySource.listRecent`).
-2. **Deduplicate** — skip opportunities already seen (SQLite).
-3. **Enrich** — fetch details for new opportunities only (`OpportunitySource.fetchDetail`).
+1. **Collect** — list recent opportunities from a source and save every summary in a persistent queue.
+2. **Deduplicate** — skip opportunities already known (SQLite).
+3. **Enrich** — fetch details for queued opportunities only (`OpportunitySource.fetchDetail`).
 4. **Filter** — classify each opportunity against the interest profile.
 5. **Analyze (optional)** — AI compatibility analysis, price range and proposal draft, in batches of up to 20.
-6. **Notify** — send opportunities to Telegram, once each; AI results enrich the message.
+6. **Notify** — send opportunities to Telegram in Portuguese, once each; each AI analysis is one compact message.
 
-All steps exist for a single source. The steps were built one SPEC at a time.
+The stages are isolated: a failure in one never blocks delivering what is already saved.
 
 ## Current flow
 
-`npm run dev` runs one pass:
+`npm run dev` runs one pass made of three independent stages:
 
-1. Re-evaluates stored opportunities whose filter result came from another rule version
-   (offline, no source access).
-2. Discovers opportunities page by page, newest first (see "Discovery" below), looking each
-   one up in the local database by its stable key `sourceId:externalId`.
-   Known ones only get `last_seen_at` updated; their details are **not** requested again.
-3. Unseen ones (up to `MAX_DETAILS_PER_RUN`, newest first) get their details fetched, are
-   normalized, filtered and stored. The rest wait for the next run.
-4. If `AI_ENABLED=true` (and `DRY_RUN=false`), analyzes pending open opportunities with the AI
-   provider, newest first, up to `AI_MAX_ANALYSES_PER_RUN` (see "AI analysis" below).
-5. Notifies: every stored opportunity with a chosen decision and `notified_at` empty is sent
-   one at a time, including ones found in earlier runs (as an AI-enriched message when an analysis
-   exists). `notified_at` is set **only after Telegram confirms delivery**; on any failure it stays
-   empty and the item is retried next run.
+1. **Collect.** Re-evaluates stored opportunities whose filter result came from another rule version
+   (offline), then discovers opportunities page by page, newest first (see "Discovery" below).
+   Every summary is saved **before** any detail request. Known ones only get `last_seen_at` updated.
+   `npm run collect` runs this stage alone.
+2. **AI (optional).** If `AI_ENABLED=true` (and `DRY_RUN=false`), analyzes pending opportunities by priority
+   (see "AI analysis" below), under the quota controls. A quota pause or an AI failure is reported and does
+   not stop the next stage.
+3. **Notify.** Sends what is owed, from the whole database (not only what this run found). Each AI analysis
+   is delivered as ONE compact Telegram message, stored before it is sent; the completion flags
+   (`opportunities.notified_at`, `analyses.notified_at`) are written **only after Telegram confirms it**.
+   A run that stops halfway resumes the stored message without repeating one already confirmed.
 
-A collection or AI failure (network, block, quota) does not stop notifications for what is already stored.
+## Discovery (persistent queue)
 
-## Discovery (pagination)
+Each run starts at the newest listing page. One page is read at a time (sequential, with the usual delay);
+every summary is compared with the database. New summaries are saved in the `discovery_queue` table
+**before** any detail is requested, so a *known* opportunity is not the same as one whose *details were
+obtained*. Queued items survive restarts and stay there after they scroll out of the listing.
 
-Each run starts at the newest listing page and only goes deeper while it still needs unseen
-opportunities. One page is read at a time (sequential, with the usual delay); every summary is
-compared with the database before any detail request. Pagination stops at the first of:
+Three limits are independent, and the first one reached stops the scan:
+
+| Limit                  | Default | Counts                                                    |
+| ---------------------- | ------- | --------------------------------------------------------- |
+| `DISCOVERY_MAX_PAGES`  | 20      | listing pages read                                        |
+| `DISCOVERY_TARGET_NEW` | 100     | **new** summaries saved (already-known ones do not count) |
+| `MAX_DETAILS_PER_RUN`  | 20      | detail pages opened                                       |
+
+`DISCOVERY_TARGET_NEW` changed meaning in this version: it used to count opportunities collected for detail
+fetching; now it counts new summaries, because the details no longer have to be fetched in the same run.
+
+The detail budget is split: half (rounded down) is reserved for older pending items (oldest first) and the
+rest goes to the newest ones; whatever one group does not use flows to the other. A detail failure keeps the
+item pending with a growing wait (15 min, doubling, up to 24 h). Only a definitive answer (HTTP 404/410 or the
+site's own "page unavailable" page) twice in a row marks it `unavailable`; a temporary error never does.
+
+Pagination stops at the first of:
 
 | Stop reason          | Meaning                                                                        |
 | -------------------- | ------------------------------------------------------------------------------ |
-| `target-new-reached` | `DISCOVERY_TARGET_NEW` unseen opportunities were collected                     |
+| `target-new-reached` | `DISCOVERY_TARGET_NEW` new summaries were saved                                |
 | `max-pages-reached`  | `DISCOVERY_MAX_PAGES` pages were read                                          |
 | `source-exhausted`   | the source has no next page, or returned an empty page                         |
 | `repeated-page`      | a page brought no ID that this run had not already seen                        |
@@ -56,15 +71,9 @@ compared with the database before any detail request. Pagination stops at the fi
 | `blocked`            | HTTP 403/429 or a CAPTCHA/challenge page: everything stops, no further request |
 | `source-error`       | any other listing failure; what was already collected is still processed       |
 
-Unseen opportunities are handled newest first. `DISCOVERY_TARGET_NEW` decides how deep to
-look; `MAX_DETAILS_PER_RUN` caps how many details are actually requested. Unseen items beyond
-that cap are reported as **deferred**: they are not stored, and the next run finds them again
-only while they are still within the pages it scans (there is no persistent queue yet).
-
-**Progressive backfill:** when page 1 is fully known, a run walks into older pages and picks up
-opportunities that were never seen (for example ones published while the program was not running),
-a few at a time. Later runs may therefore keep finding older opportunities; that is expected and is
-not a deduplication failure. Notifications stay once-only: `notified_at` is untouched by discovery.
+The report shows pages read, discovered / already known / new, details attempted / obtained / failed /
+unavailable, and the queue state (pending, done, unavailable), so the numbers always add up.
+Notifications stay once-only: discovery never touches `notified_at`.
 
 A source exposes pagination through one small contract: `listRecent(cursor?)` returns
 `{ items, nextCursor }`, where the cursor is opaque to everything except the source (for 99Freelas it
@@ -73,11 +82,27 @@ is the page number). Nothing platform-specific reaches the domain.
 ## AI analysis (optional, Gemini free tier)
 
 Off by default (`AI_ENABLED=false`); with it off, everything else works exactly as before.
-When on, after discovery the program analyzes **pending open opportunities, newest first, up to
-`AI_MAX_ANALYSES_PER_RUN` (at most 20)**, one request at a time (~6.5 s apart to stay under free-tier
-rate limits). Cancelled, closed and unknown-status opportunities are never analyzed. Stored open ones
-that lack a result for the current **analysis version** (`ai-v1`) are picked up too (backfill); an
-opportunity is never analyzed twice for the same version unless forced.
+When on, after discovery the program analyzes **pending open opportunities, up to
+`AI_MAX_ANALYSES_PER_RUN` (at most 20)**, one request at a time, under the quota controls below.
+Cancelled, closed and unknown-status opportunities are never analyzed. An opportunity is never analyzed
+twice for the same **analysis version** unless forced.
+
+**Selection priority.** Opportunities the deterministic filter marked `shortlist` or `review` come first;
+`skip` ones are kept aside and only analyzed with `-- --only`. Never-attempted opportunities go before ones
+whose earlier attempt failed, and a failed one is retried at most 3 times (then it is reported as exhausted
+until forced). Inside a group, the newest and the longest-waiting opportunities alternate. Skill aliases (for
+example "responsive layouts" for responsiveness) are normalized in the verification without confirming
+anything: the skill stays `unverified`. Successes of an older version are never invalidated in bulk.
+
+**Gemini quota controls.** Requests start at least `GEMINI_MIN_INTERVAL_SECONDS` (15) apart, retries included.
+A per-model **daily counter** (`GEMINI_MAX_REQUESTS_PER_DAY`, default 20) is stored in the database, and one
+unit is reserved *before* each call (a retry counts as a request). The quota day rolls over at midnight in
+`America/Los_Angeles`, not in Brasília time. A lock stops two runs from using the free tier at once and
+recovers itself after a crash. On HTTP 429 the program reads `Retry-After` and the quota details, stores a
+**cooldown** and stops the batch; later runs do not even try until it expires (an unknown quota kind gets a
+short cooldown, never an invented daily reset). The counter only covers requests made **since this version
+was installed**; earlier usage is unknown to the program, so the real quota may be lower than the counter
+shows. Reports separate requests made now from the daily total, so nothing is counted twice.
 
 Per opportunity the model returns, and the program validates locally: score 0-100 (technical fit only),
 confidence, recommendation (`apply`/`review`/`skip`), fit explanation, matched and missing skills,
@@ -94,7 +119,7 @@ as a success**. The AI result is stored **next to** the deterministic `basic-v2`
   or outside the profile). Otherwise it becomes `review`, confidence is capped at `medium`, and the uncertainty is
   spelled out. Proposals may not assert competence. The score is a technical-fit rating, not a probability.
 - **Analysis version.** Results are stored per opportunity and version = prompt version + a fingerprint of the
-  profile (`ai-v2+p…`). Changing the profile in a relevant way makes everything eligible again; older results
+  profile (`ai-v3+p…`). Changing the profile in a relevant way makes everything eligible again; older results
   stay as history and their proposal drafts are marked `discarded`.
 - **Truthfulness.** The prompt and a local guard use the candidate profile and any recorded experience (currently none). The prompt forbids inventing
   experience, clients, projects, years or certifications; matched skills outside the profile are moved
@@ -105,10 +130,10 @@ as a success**. The AI result is stored **next to** the deterministic `basic-v2`
   payment requests) is turned into listed risks. Output must be JSON and is validated field by field.
 - **Free tier only.** One model (`AI_MODEL`), no grounding or tools, **no fallback to another model or
   provider**. The key travels in a request header and is scrubbed from every error and never stored.
-  HTTP 429 (quota) stops the batch: completed analyses stay saved, the rest stay pending. Timeouts,
+  HTTP 429 (quota) stops the batch and stores a cooldown: completed analyses stay saved, the rest stay pending. Timeouts,
   network errors and 5xx get exactly one retry; three outages in a row end the batch. A bad key or model
   stops the batch without blaming any opportunity. Failed opportunities are recorded (with a trimmed,
-  secret-free message) and simply retried by the next run.
+  secret-free message) and retried by a later run, up to 3 attempts.
 - **Restricted access.** A source can mark an opportunity as `premium_only` (99Freelas: "Projeto
   Exclusivo", which opens to everyone after a countdown). The candidate's 99Freelas account is recorded
   as **free**, so a compatible restricted opportunity becomes recommendation **`wait`** while its score
@@ -116,12 +141,48 @@ as a success**. The AI result is stored **next to** the deterministic `basic-v2`
   otherwise it stays empty and the raw label is preserved. Old stored rows have unknown access. Nothing
   is ever bought or clicked, and the opportunity must be refreshed before any future application.
 - **Notifications.** Independent state per AI result (`analyses.notified_at`): a new opportunity that has
-  an analysis gets one **enriched** message; one already notified gets a single separate **AI update**;
+  an analysis gets one **enriched** delivery; one already notified gets a single separate **AI update**;
   without an analysis (AI off or failing) the basic message goes out as before. A clear AI `skip` is never
-  announced and withholds the basic message. Headers: `🟢 APPLY`, `🟡 REVIEW`, `🕒 WAIT — PREMIUM ONLY`.
-  With `DRY_RUN=true` nothing is sent or marked, and Gemini is not called.
+  announced and withholds the basic message. See "Telegram messages" below.
+  With `DRY_RUN=true` nothing is sent, stored or marked, and Gemini is not called.
 
 Set the key only in your local `.env` (`GEMINI_API_KEY=`); never paste it in chat or commit it.
+
+## Telegram messages (Portuguese)
+
+The text sent to Telegram is in Brazilian Portuguese (the code and everything else stay in English). The message is
+built only from stored data; the AI is never called to format it. Each opportunity with an AI analysis gets **one**
+compact message (aim: 600-900 visible characters, ceiling 1000), with:
+
+1. the classification (`🟢 VALE CANDIDATAR-SE`, `🟡 VALE REVISAR`, `🕒 AGUARDAR LIBERAÇÃO`, `🔴 NÃO VALE A PENA`) and the title;
+2. the platform;
+3. one short sentence about the work;
+4. the price suggested by the AI, kept apart from the client's budget, and the estimated effort;
+5. the main caveat (unverified essential skills first, otherwise the AI's first risk);
+6. availability as of the last check, never stated as confirmed ("estimated release, confirm on the site");
+7. the link to open the project.
+
+There is no proposal, no skill list, no internal explanation, no second automatic message and no "details in the next
+messages". The complete analysis and the proposal draft stay in the database; read them with
+`npm run analyses -- --details --proposals` (`--messages` shows the message as it would be sent). Interactive buttons
+are not implemented. Over-long fields are shortened in steps; a tag or link is never cut.
+
+**Delivery state.** The message is stored (`deliveries`, `delivery_parts`) before sending and receives the Telegram
+`message_id` once confirmed. The analysis is marked notified only after confirmation, and a message already confirmed is
+never sent again. Changing how messages look never re-sends history.
+
+**Former multi-part deliveries.** An earlier format sent a summary plus detail parts. A delivery of that format that
+never completed is **not** resumed and its unsent parts are **not** marked as delivered. If at least one part had reached
+the owner, the analysis is held (not announced again); if nothing had reached the owner, it is delivered in the compact
+format. The notification report lists these cases.
+
+**Known limit (exactly-once).** If Telegram accepts a message but the confirmation is lost (timeout or network error
+after sending), the program cannot know. It is recorded as *ambiguous* and reported, and it is retried on the next run,
+so in rare cases one message may appear twice. It is never silently dropped.
+
+`npm run notify:demo -- --id <sourceId:externalId> [--label x]` sends **one** identified preview ("🧪 PRÉVIA") of a
+saved analysis (no AI, no site access). It is stored as its own delivery, so it never marks the real notification, and
+repeating it with the same label sends nothing new. With `DRY_RUN=true` it only prints and writes nothing.
 
 ## Filter (`basic-v2`)
 
@@ -148,11 +209,14 @@ When the rule version changes, stored decisions are re-evaluated automatically (
 
 | Command                  | Description                                                              |
 | ------------------------ | ------------------------------------------------------------------------ |
-| `npm run dev`            | One full pass: collect, dedup, filter, persist, notify                   |
+| `npm run dev`            | One full pass: collect, AI (if enabled), notify                          |
+| `npm run collect`        | Collect only: discovery + queue + details (no AI, no Telegram)           |
 | `npm run opportunities`  | List stored opportunities by shortlist / review / skip (read-only view)  |
 | `npm run telegram:test`  | Send `🎯 Job Sniper online.` (printed only when `DRY_RUN=true`)          |
 | `npm run ai:analyze`     | Analyze pending opportunities (`-- --limit N`, `-- --only <id>`, `-- --force`); no site access |
-| `npm run analyses`       | Show stored AI analyses by recommendation (`-- --proposals`, `-- --messages`); discards drafts of superseded versions |
+| `npm run analyses`       | Show stored AI analyses by recommendation (`-- --details`, `-- --proposals`, `-- --messages`); discards drafts of superseded versions |
+| `npm run notify:analyses`| Deliver saved analyses to Telegram; never calls Gemini                   |
+| `npm run notify:demo`    | One demonstration delivery of a saved analysis (`-- --id <id> [--label x]`) |
 | `npm run access:refresh` | Re-read one opportunity's detail (`-- --id <sourceId:externalId>`, 1 request) and update only its access |
 | `npm test`               | Offline tests (Node's built-in runner; no network, no Telegram, no Gemini) |
 | `npm run typecheck`      | Type-check without emitting files                                        |
@@ -169,14 +233,19 @@ SQLite through Node's built-in `node:sqlite` (no extra dependency; Node prints a
 "experimental" warning). The file and its folder are created automatically and are never
 deleted by the program. Database files are git-ignored.
 
+The schema version is kept in `PRAGMA user_version` (now **3**). Opening an older database migrates it
+automatically and idempotently (only new tables are added; existing rows are untouched), after first
+copying it to `<name>.pre-v<N>.db` next to it (for example `job-sniper.pre-v3.db`, also git-ignored).
+Version 3 adds `discovery_queue`, `deliveries`, `delivery_parts`, `quota_usage`, `quota_state` and `run_locks`.
+
 ## Environment variables
 
 | Variable                    | Default                 | Purpose                                                    |
 | --------------------------- | ----------------------- | ---------------------------------------------------------- |
 | `DATABASE_PATH`             | `./data/job-sniper.db`  | SQLite file location                                       |
-| `MAX_DETAILS_PER_RUN`       | `10`                    | Max detail requests per run (invalid value → `10`)         |
-| `DISCOVERY_MAX_PAGES`       | `5`                     | Most listing pages read per run (positive integer, else the run fails) |
-| `DISCOVERY_TARGET_NEW`      | `10`                    | Stop paginating after this many unseen opportunities (positive integer, else the run fails) |
+| `MAX_DETAILS_PER_RUN`       | `20`                    | Max detail requests per run (invalid value → `20`)         |
+| `DISCOVERY_MAX_PAGES`       | `20`                    | Most listing pages read per run (positive integer, else the run fails) |
+| `DISCOVERY_TARGET_NEW`      | `100`                   | Stop paginating after this many **new** summaries were saved (positive integer, else the run fails) |
 | `DRY_RUN`                   | `true`                  | `true`: print messages, send nothing, mark nothing. Only an explicit `false` sends |
 | `TELEGRAM_NOTIFY_DECISIONS` | `shortlist,review`      | Which decisions are notified                               |
 | `AI_ENABLED`                | `false`                 | `true` turns AI analysis on (anything else keeps it off)   |
@@ -184,6 +253,8 @@ deleted by the program. Database files are git-ignored.
 | `AI_MODEL`                  | `gemini-3.6-flash`      | The single model used                                      |
 | `GEMINI_API_KEY`            | —                       | Required only for real AI requests (not in dry-run)        |
 | `AI_MAX_ANALYSES_PER_RUN`   | `20`                    | Analyses per run, 1-20 (invalid value fails when AI is on) |
+| `GEMINI_MIN_INTERVAL_SECONDS` | `15`                  | Minimum seconds between request starts, retries included (AI on only) |
+| `GEMINI_MAX_REQUESTS_PER_DAY` | `20`                  | Local daily counter per model, reserved before each call (AI on only) |
 | `TELEGRAM_BOT_TOKEN`        | —                       | Bot token, required only when `DRY_RUN=false`              |
 | `TELEGRAM_CHAT_ID`          | —                       | Destination chat, required only when `DRY_RUN=false`       |
 
@@ -220,23 +291,25 @@ npm install
 
 ```
 src/
-  index.ts                       Entrypoint: config, wiring, terminal report
+  index.ts                       Entrypoint: config, wiring, three isolated stages, terminal report
+  cli/collect.ts                 npm run collect
+  cli/notify-demo.ts             npm run notify:demo
   cli/opportunities.ts           npm run opportunities
   cli/telegram-test.ts           npm run telegram:test
   config.ts                      Environment settings with safe defaults
   domain/opportunity.ts          Platform-independent Opportunity model
   domain/filter-result.ts        FilterResult (shortlist | review | skip)
-  profile/                       InterestProfile + Don Bruno's interests; CandidateProfile (skills, capabilities)
-  ai/                            Analyzer contract, Gemini client, prompt, output validation, batch runner
+  profile/                       InterestProfile + Don Bruno's interests; CandidateProfile (skills, capabilities, aliases)
+  ai/                            Analyzer contract, Gemini client, prompt, output validation, batch runner, quota
   domain/match-analysis.ts       MatchAnalysis, ProposalDraft, actionability (provider-independent)
   filter/opportunity-filter.ts   Deterministic, explainable filter (basic-v2)
-  storage/opportunity-store.ts   Generic SQLite persistence
-  pipeline/run-pipeline.ts       list -> dedup -> details -> filter -> persist
+  storage/                       SQLite: opportunities, analyses, discovery queue, deliveries, Gemini quota
+  pipeline/run-pipeline.ts       list -> save summaries (queue) -> details -> filter -> persist
   pipeline/reevaluate.ts         Re-runs the filter on stored rows of older rule versions
-  notify/                        Notifier interface, Telegram client, message format, pending sender
+  notify/                        Notifier, Telegram client, pt-BR compact presentation, resumable delivery
   sources/opportunity-source.ts  OpportunitySource contract (paged: listRecent(cursor) -> items + nextCursor)
   **/*.test.ts                   Offline tests next to the code they cover (npm test)
-  sources/source-errors.ts       Blocked / unusable-response errors
+  sources/source-errors.ts       Blocked / not-found / unusable-response errors
   sources/99freelas/             First adapter: client (transport), parser (HTML), source
 .env.example                     Configuration template (no secrets)
 STATUS.md                        Current project state

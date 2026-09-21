@@ -16,9 +16,10 @@ export interface AppConfig {
 }
 
 export const DEFAULT_DATABASE_PATH = './data/job-sniper.db';
-export const DEFAULT_MAX_DETAILS_PER_RUN = 10;
-export const DEFAULT_DISCOVERY_MAX_PAGES = 5;
-export const DEFAULT_DISCOVERY_TARGET_NEW = 10;
+// Independent limits per run (none of them promises to cover the whole site):
+export const DEFAULT_MAX_DETAILS_PER_RUN = 20; // detail requests, shared between new and older pending items
+export const DEFAULT_DISCOVERY_MAX_PAGES = 20; // listing pages, newest first
+export const DEFAULT_DISCOVERY_TARGET_NEW = 100; // new summaries saved to the queue before pagination stops
 export const DEFAULT_NOTIFY_DECISIONS: readonly FilterDecision[] = ['shortlist', 'review'];
 
 const DECISIONS: readonly FilterDecision[] = ['shortlist', 'review', 'skip'];
@@ -86,6 +87,10 @@ export interface AiConfig {
   apiKey: string | null;
   /** Analyses attempted per run, 1-20. */
   maxAnalysesPerRun: number;
+  /** Minimum seconds between the start of two provider requests, retries included. */
+  minIntervalSeconds: number;
+  /** Most provider requests (attempts, retries included) per quota day, as counted by this app. */
+  maxRequestsPerDay: number;
 }
 
 export const DEFAULT_AI_PROVIDER = 'gemini';
@@ -93,6 +98,10 @@ export const DEFAULT_AI_MODEL = 'gemini-3.6-flash';
 export const DEFAULT_AI_MAX_ANALYSES_PER_RUN = 20;
 /** Analyses are batched in groups of at most this many. */
 export const AI_MAX_ANALYSES_LIMIT = 20;
+// Limits observed for this project's free tier on gemini-3.6-flash: 5 requests/minute and 20 requests/day.
+// They belong to that account, not to Gemini in general, so both are configurable.
+export const DEFAULT_GEMINI_MIN_INTERVAL_SECONDS = 15;
+export const DEFAULT_GEMINI_MAX_REQUESTS_PER_DAY = 20;
 
 /**
  * AI settings, read separately from the rest so a typo here can never break commands that do not use AI.
@@ -116,7 +125,14 @@ export function loadAiConfig(
     model: env.AI_MODEL?.trim() || DEFAULT_AI_MODEL,
     apiKey: env.GEMINI_API_KEY?.trim() || null,
   };
-  if (!enabled) return { ...base, maxAnalysesPerRun: DEFAULT_AI_MAX_ANALYSES_PER_RUN };
+  if (!enabled) {
+    return {
+      ...base,
+      maxAnalysesPerRun: DEFAULT_AI_MAX_ANALYSES_PER_RUN,
+      minIntervalSeconds: DEFAULT_GEMINI_MIN_INTERVAL_SECONDS,
+      maxRequestsPerDay: DEFAULT_GEMINI_MAX_REQUESTS_PER_DAY,
+    };
+  }
 
   if (base.provider !== 'gemini') {
     throw new ConfigError(`AI_PROVIDER "${base.provider}" is not supported. Only "gemini" is available.`);
@@ -125,7 +141,12 @@ export function loadAiConfig(
   if (maxAnalysesPerRun > AI_MAX_ANALYSES_LIMIT) {
     throw new ConfigError(`AI_MAX_ANALYSES_PER_RUN must be at most ${AI_MAX_ANALYSES_LIMIT}, but got ${maxAnalysesPerRun}.`);
   }
-  return { ...base, maxAnalysesPerRun };
+  return {
+    ...base,
+    maxAnalysesPerRun,
+    minIntervalSeconds: positiveInteger(env, 'GEMINI_MIN_INTERVAL_SECONDS', DEFAULT_GEMINI_MIN_INTERVAL_SECONDS),
+    maxRequestsPerDay: positiveInteger(env, 'GEMINI_MAX_REQUESTS_PER_DAY', DEFAULT_GEMINI_MAX_REQUESTS_PER_DAY),
+  };
 }
 
 /** The Gemini API key, required only when a real request is about to be made. Never echoed. */

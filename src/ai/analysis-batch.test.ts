@@ -2,29 +2,31 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { MatchAnalysis } from '../domain/match-analysis.js';
 import type { Opportunity } from '../domain/opportunity.js';
+import { brunoCandidate } from '../profile/bruno-candidate.js';
 import { OpportunityStore } from '../storage/opportunity-store.js';
 import { makeAnalysis, makeFilter, makeOpportunity, NOW, SOURCE } from '../testing/fixtures.js';
 import type { AnalysisInput, OpportunityAnalyzer } from './analyzer.js';
-import { ANALYSIS_VERSION } from './current-version.js';
 import { planAnalyses, runAnalysisBatch } from './analysis-batch.js';
+import { ANALYSIS_VERSION } from './current-version.js';
 import {
   AnalysisInvalidOutputError,
   AnalysisQuotaError,
   AnalysisRejectedError,
   AnalysisUnavailableError,
 } from './errors.js';
-import { brunoCandidate } from '../profile/bruno-candidate.js';
 
 class FakeAnalyzer implements OpportunityAnalyzer {
   readonly id = 'fake';
   readonly model = 'fake-model';
   readonly calls: string[] = [];
-  /** externalId -> error thrown for it (or a function to build one) */
+  /** externalId -> error thrown for it */
   readonly failures = new Map<string, Error>();
+  /** 1-based call number -> error thrown on that call */
+  readonly failuresByCall = new Map<number, Error>();
 
   async analyze(input: AnalysisInput): Promise<MatchAnalysis> {
     this.calls.push(input.opportunity.externalId);
-    const failure = this.failures.get(input.opportunity.externalId);
+    const failure = this.failuresByCall.get(this.calls.length) ?? this.failures.get(input.opportunity.externalId);
     if (failure) throw failure;
     return makeAnalysis(input.opportunity);
   }
@@ -38,7 +40,7 @@ function storeWith(count: number, over: (id: string) => Partial<Opportunity> = (
       publishedAt: `2026-04-01T00:${String(id).padStart(2, '0')}:00.000Z`,
       ...over(String(id)),
     });
-    store.insert(opportunity, makeFilter(), '2026-04-01T00:00:00.000Z');
+    store.insert(opportunity, makeFilter(), `2026-04-01T00:${String(id).padStart(2, '0')}:00.000Z`);
   }
   return store;
 }
@@ -46,7 +48,13 @@ function storeWith(count: number, over: (id: string) => Partial<Opportunity> = (
 const run = (store: OpportunityStore, analyzer: OpportunityAnalyzer, over: { limit?: number; force?: boolean; only?: { sourceId: string; externalId: string } } = {}) =>
   runAnalysisBatch({ store, analyzer, candidate: brunoCandidate, limit: over.limit ?? 20, now: () => NOW, ...(over.force ? { force: true } : {}), ...(over.only ? { only: over.only } : {}) });
 
-test('the batch never exceeds the limit of 20 and analyzes the newest first', async () => {
+/** The counters that matter for these tests (the rest of the shape is covered by the selection tests). */
+const snapshot = (store: OpportunityStore) => {
+  const { pending, success, failed } = store.analyses.counts(ANALYSIS_VERSION);
+  return { pending, success, failed };
+};
+
+test('the batch never exceeds the limit of 20 and starts with the most recent', async () => {
   const store = storeWith(25);
   const analyzer = new FakeAnalyzer();
   const report = await run(store, analyzer);
@@ -55,8 +63,7 @@ test('the batch never exceeds the limit of 20 and analyzes the newest first', as
   assert.equal(report.succeeded, 20);
   assert.equal(report.leftPending, 5);
   assert.equal(analyzer.calls[0], '25');
-  assert.equal(analyzer.calls[19], '6');
-  assert.ok(!analyzer.calls.includes('5'));
+  assert.equal(new Set(analyzer.calls).size, 20, 'no opportunity is analyzed twice');
   assert.equal(store.analyses.counts(ANALYSIS_VERSION).pending, 5);
 });
 
@@ -64,32 +71,53 @@ test('a smaller configured limit is respected', async () => {
   const analyzer = new FakeAnalyzer();
   const report = await run(storeWith(10), analyzer, { limit: 3 });
   assert.equal(report.attempted, 3);
-  assert.deepEqual(analyzer.calls, ['10', '9', '8']);
+  assert.equal(analyzer.calls.length, 3);
+  assert.equal(analyzer.calls[0], '10');
 });
 
 test('quota exhaustion keeps completed analyses, leaves the rest pending, and records nothing against them', async () => {
   const store = storeWith(6);
   const analyzer = new FakeAnalyzer();
-  analyzer.failures.set('4', new AnalysisQuotaError('quota'));
+  analyzer.failuresByCall.set(3, new AnalysisQuotaError('quota', { kind: 'minute', retryAfterSeconds: 30, evidence: [] }));
   const report = await run(store, analyzer);
 
   assert.equal(report.stopReason, 'quota-exhausted');
-  assert.deepEqual(analyzer.calls, ['6', '5', '4']);
+  assert.equal(analyzer.calls.length, 3);
   assert.equal(report.succeeded, 2);
-  const counts = store.analyses.counts(ANALYSIS_VERSION);
-  assert.deepEqual(counts, { pending: 4, success: 2, failed: 0 });
-  assert.ok(store.analyses.get({ sourceId: SOURCE, externalId: '6' }, ANALYSIS_VERSION));
-  assert.equal(store.analyses.get({ sourceId: SOURCE, externalId: '4' }, ANALYSIS_VERSION), null);
+  assert.deepEqual(snapshot(store), { pending: 4, success: 2, failed: 0 });
+  assert.ok(store.analyses.get({ sourceId: SOURCE, externalId: analyzer.calls[0]! }, ANALYSIS_VERSION));
+  assert.equal(store.analyses.get({ sourceId: SOURCE, externalId: analyzer.calls[2]! }, ANALYSIS_VERSION), null);
+});
+
+test('a provider quota refusal saves a pause that survives restarts and is reported', async () => {
+  const store = storeWith(3);
+  const analyzer = new FakeAnalyzer();
+  analyzer.failuresByCall.set(1, new AnalysisQuotaError('quota', { kind: 'minute', retryAfterSeconds: 30, evidence: ['GenerateRequestsPerMinutePerProjectPerModel'] }));
+  const report = await run(store, analyzer);
+  assert.equal(report.cooldownUntil, new Date(NOW.getTime() + 31_000).toISOString());
+  const state = store.quota.state('fake', 'fake-model');
+  assert.equal(state?.cooldownUntil, report.cooldownUntil);
+  assert.match(state?.cooldownReason ?? '', /limite por minuto/);
+});
+
+test('a local refusal (daily limit or pause) does not create a new provider pause', async () => {
+  const store = storeWith(2);
+  const analyzer = new FakeAnalyzer();
+  analyzer.failuresByCall.set(1, new AnalysisQuotaError('local limit', { kind: 'local-day', retryAfterSeconds: null, evidence: [] }, true));
+  const report = await run(store, analyzer);
+  assert.equal(report.stopReason, 'quota-exhausted');
+  assert.equal(report.cooldownUntil, null);
+  assert.equal(store.quota.state('fake', 'fake-model'), null);
 });
 
 test('a rejected request (bad key/model) stops the batch without blaming any opportunity', async () => {
   const store = storeWith(3);
   const analyzer = new FakeAnalyzer();
-  analyzer.failures.set('3', new AnalysisRejectedError('HTTP 400'));
+  analyzer.failuresByCall.set(1, new AnalysisRejectedError('HTTP 400'));
   const report = await run(store, analyzer);
   assert.equal(report.stopReason, 'provider-rejected');
   assert.equal(analyzer.calls.length, 1);
-  assert.deepEqual(store.analyses.counts(ANALYSIS_VERSION), { pending: 3, success: 0, failed: 0 });
+  assert.deepEqual(snapshot(store), { pending: 3, success: 0, failed: 0 });
 });
 
 test('a failed opportunity is recorded, stays pending, and does not stop the others', async () => {
@@ -100,7 +128,7 @@ test('a failed opportunity is recorded, stays pending, and does not stop the oth
 
   assert.equal(report.succeeded, 3);
   assert.equal(report.failed, 1);
-  assert.deepEqual(store.analyses.counts(ANALYSIS_VERSION), { pending: 1, success: 3, failed: 1 });
+  assert.deepEqual(snapshot(store), { pending: 1, success: 3, failed: 1 });
   const failedRow = store.analyses.list(ANALYSIS_VERSION, 'failed')[0]!;
   assert.match(failedRow.errorMessage ?? '', /bad score/);
   assert.equal(failedRow.provider, 'fake');
@@ -112,19 +140,17 @@ test('a failed opportunity is recorded, stays pending, and does not stop the oth
   const retry = await run(store, analyzer);
   assert.deepEqual(analyzer.calls, ['3']);
   assert.equal(retry.succeeded, 1);
-  assert.deepEqual(store.analyses.counts(ANALYSIS_VERSION), { pending: 0, success: 4, failed: 0 });
+  assert.deepEqual(snapshot(store), { pending: 0, success: 4, failed: 0 });
 });
 
 test('three consecutive outages end the batch; earlier successes are preserved', async () => {
   const store = storeWith(8);
   const analyzer = new FakeAnalyzer();
-  analyzer.failures.set('7', new AnalysisUnavailableError('down'));
-  analyzer.failures.set('6', new AnalysisUnavailableError('down'));
-  analyzer.failures.set('5', new AnalysisUnavailableError('down'));
+  for (const call of [2, 3, 4]) analyzer.failuresByCall.set(call, new AnalysisUnavailableError('down'));
   const report = await run(store, analyzer);
   assert.equal(report.stopReason, 'provider-unavailable');
   assert.equal(report.succeeded, 1);
-  assert.deepEqual(analyzer.calls, ['8', '7', '6', '5']);
+  assert.equal(analyzer.calls.length, 4);
   assert.equal(store.analyses.counts(ANALYSIS_VERSION).success, 1);
 });
 

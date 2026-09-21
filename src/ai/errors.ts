@@ -6,11 +6,27 @@ export class AnalysisInvalidOutputError extends Error {
   }
 }
 
+/**
+ * What a quota refusal tells us. Only what the evidence supports is named: "minute", "tokens" or "day" need
+ * the provider's own quota identifier; otherwise the kind is "unknown". "local-day" and "cooldown" are refusals
+ * made by this app before any request was sent.
+ */
+export interface QuotaInfo {
+  kind: 'minute' | 'tokens' | 'day' | 'unknown' | 'local-day' | 'cooldown';
+  retryAfterSeconds: number | null;
+  /** Quota identifiers the provider returned, if any. */
+  evidence: string[];
+}
+
 /** Quota or rate limit reached (HTTP 429). The remaining work stays pending; nothing is retried. */
 export class AnalysisQuotaError extends Error {
-  constructor(message: string) {
+  /** True when this app refused before sending anything (local daily limit or an active cooldown). */
+  readonly local: boolean;
+
+  constructor(message: string, readonly info: QuotaInfo | null = null, local = false) {
     super(message);
     this.name = 'AnalysisQuotaError';
+    this.local = local;
   }
 }
 

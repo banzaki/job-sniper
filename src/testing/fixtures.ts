@@ -36,7 +36,7 @@ export function makeOpportunity(id = '1', over: Partial<Opportunity> = {}): Oppo
 }
 
 export function makeFilter(decision: FilterResult['decision'] = 'shortlist'): FilterResult {
-  return { decision, reasons: ['test'], matchedKeywords: ['HTML'], evaluatedAt: NOW.toISOString(), ruleVersion: 'basic-v2' };
+  return { decision, reasons: ['strong signals: HTML'], matchedKeywords: ['HTML'], evaluatedAt: NOW.toISOString(), ruleVersion: 'basic-v2' };
 }
 
 /** A model answer that satisfies the schema and every local rule. */

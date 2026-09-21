@@ -9,6 +9,7 @@ import type {
 } from '../domain/match-analysis.js';
 import type { Opportunity } from '../domain/opportunity.js';
 import type { CandidateProfile, CandidateSkill } from '../profile/candidate-profile.js';
+import { SKILL_ALIASES } from '../profile/skill-aliases.js';
 import { normalizeText, padWords } from '../text.js';
 import { analysisVersionFor } from './analyzer.js';
 import { AnalysisInvalidOutputError } from './errors.js';
@@ -208,17 +209,18 @@ export function checkProposal(proposal: string, candidate: CandidateProfile): st
 }
 
 function skillTerms(skill: CandidateSkill): string[] {
-  return [skill.name, ...(skill.aliases ?? [])].map(normalizeText).filter((term) => term !== '');
+  const known = SKILL_ALIASES[skill.name] ?? [];
+  return [skill.name, ...(skill.aliases ?? []), ...known].map(normalizeText).filter((term) => term !== '');
 }
 
-type SkillStanding = 'confirmed' | 'unverified' | 'learning' | 'notCovered';
+export type SkillStanding = 'confirmed' | 'unverified' | 'learning' | 'notCovered';
 
 /**
  * What the profile says about one skill named by the model. "notCovered" means the profile does not list it
  * as something the candidate has, or lists it as unavailable. Otherwise the strongest level found wins:
  * confirmed, then unverified (interest only), then learning.
  */
-function standingOf(skill: string, candidate: CandidateProfile): SkillStanding {
+export function standingOf(skill: string, candidate: CandidateProfile): SkillStanding {
   const normalized = normalizeText(skill);
   const unavailable = candidate.skills.filter((entry) => entry.level === 'unavailable');
   if (unavailable.some((entry) => skillTerms(entry).some((term) => padWords(normalized).includes(padWords(term))))) {

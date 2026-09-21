@@ -1,6 +1,59 @@
 # STATUS
 
-Last updated: 2026-09-20 (SPEC 004 — AI analysis: implemented, offline-validated, live Gemini acceptance pending; not committed)
+Last updated: 2026-09-20 (SPEC 005 implemented, compact Telegram format applied after Tech Lead review; awaiting review, not committed. SPEC 004 committed as 4aa3f07)
+
+## SPEC 005 — Readable Telegram, persistent queue, quota control (implemented; awaiting review)
+
+**Status:** code, offline tests and the limited live acceptance are done. **Not committed** (waiting for the Tech Lead's review).
+The SPEC 004 checkpoint is committed (`4aa3f07`, "feat: add AI opportunity analysis and proposal drafts"); the SPEC 005
+changes are uncommitted on top of it.
+
+- **Telegram (pt-BR), compact format (Tech Lead decision, replaces the summary + details format):** ONE message per
+  opportunity, aiming at 600-900 visible characters with a ceiling of 1000: classification and title, platform, one
+  sentence about the work, AI suggested price kept apart from the client's budget, estimated effort, the main caveat,
+  availability (an estimated release time is never stated as confirmed) and the link. No proposal, skill lists, internal
+  explanations, second automatic message or "details in the next messages". The full analysis and the proposal draft stay
+  in the database and are read with `npm run analyses` (`--details`, `--proposals`, `--messages`). No AI call to format,
+  no interactive buttons. Delivery keeps its controls: stored before sending, `message_id` on confirmation, flags only
+  after confirmation, dry-run writes nothing, presentation changes never re-send history. `npm run notify:demo` sends
+  one identified preview of a saved analysis.
+- **Deliveries in the former multi-part format** (reference without the `#c1` marker) are **not resumed and not re-sent**;
+  their unsent parts are never marked as delivered. If at least one part had reached the owner the analysis is *held*
+  (not announced again, flags untouched); if nothing had reached the owner it is delivered in the compact format. Both
+  cases are listed in the notification report. The real database has none (only two completed demo deliveries).
+- **Persistent queue (`discovery_queue`):** summaries saved before details; known ≠ details obtained; survives restarts;
+  temporary failures back off (15 min doubling to 24 h); `unavailable` only after a definitive not-found twice.
+  Independent limits: 20 pages, 100 new summaries, 20 details; the detail budget is split between older pending and new.
+  `DISCOVERY_TARGET_NEW` now counts new summaries.
+- **AI selection:** shortlist/review first; basic-skip kept aside unless `--only`; never-attempted before failed; at most 3
+  attempts per failed opportunity; skill aliases without confirming anything; no mass invalidation of successes.
+- **Gemini quota:** 15 s between request starts (retries included); persisted daily counter per model (default 20)
+  reserved before each call; day rollover in America/Los_Angeles; lock with crash recovery; `Retry-After` and quota
+  detail parsing; persisted cooldown on 429; an AI pause never blocks delivering saved analyses.
+- **Schema v3** (`PRAGMA user_version = 3`): adds `discovery_queue`, `deliveries`, `delivery_parts`, `quota_usage`,
+  `quota_state`, `run_locks`. Validated on a copy first, then applied to the real database with an automatic backup
+  (`data/job-sniper.pre-v3.db`, git-ignored). After the migration: opportunities, analyses and proposal drafts are
+  byte-identical to the backup (27 / 14 / 11 rows).
+
+**Live acceptance (2026-09-20, no Gemini call, `quota_usage` stayed empty):**
+- First demo (former two-part format, superseded): 2 parts sent, repeat sent 0.
+- Compact preview of `99freelas:785772` (after the format decision): dry-run rendered 1 message and wrote nothing; the real run
+  sent 1 message (576 visible characters, with `message_id`); the repeat of the same command sent 0. Real notification
+  flags unchanged (7 and 1); `quota_usage` stayed empty.
+- Real discovery limited to 3 pages and 2 details: 30 summaries = 0 known + 30 new + 0 queued; 2 details attempted =
+  2 obtained + 0 failed + 0 unavailable; queue afterwards: 28 pending, 2 done; stop reason `max-pages-reached`; 5 HTTP requests.
+- Quota controls were validated with a **simulated** clock and provider (18 tests): pacing, retry counted, daily limit across
+  restarts and LA rollover, shared counter, 429 parsing, cooldown across restarts, lock and crash recovery. No real Gemini
+  call was made in the SPEC 005 mission.
+
+**Known limits / risks:**
+- Telegram delivery is at-least-once in one rare case: if a message is accepted but the confirmation is lost, that part
+  is recorded as *ambiguous*, reported and retried next run, so it can appear twice. It is never dropped silently.
+- The daily Gemini counter only knows requests made since this version; earlier usage is invisible to it.
+- 28 discovered opportunities are still pending details; they are worked off by later runs, 20 details per run.
+- The one-sentence description comes from the opportunity text (first sentence, list numbers and heading words removed);
+  the real preview came out at 576 characters, a little under the 600 aim, because that sentence is short.
+- Not started: dashboard, scheduler, second source, payment, automatic application.
 
 ## Implemented
 
@@ -24,10 +77,11 @@ Last updated: 2026-09-20 (SPEC 004 — AI analysis: implemented, offline-validat
   `DRY_RUN=false`; validated before any request is made). `.env.example` updated.
 - Not started: dashboard, scheduler, second source, automatic application (auto-apply), login automation, Playwright.
 
-## SPEC 004 — AI analysis + assisted proposal (implemented and validated offline; LIVE Gemini acceptance pending)
+## SPEC 004 — AI analysis + assisted proposal (implemented, committed `4aa3f07`; real Gemini and Telegram acceptance succeeded)
 
-**Status:** code, migration and offline validation are complete. The live Gemini acceptance has **not**
-been run: it needs `GEMINI_API_KEY` in the local `.env` (never in chat). Not committed; awaiting review.
+**Status:** code, migration and offline validation are complete, and the acceptance with the real Gemini and the real
+Telegram succeeded (analyses were produced and the saved analysis of 99freelas:785772 was delivered to the owner's Telegram).
+The sections below keep the history, including the intermediate problems that were fixed along the way.
 
 **Architecture** (`src/ai/`): provider-independent `OpportunityAnalyzer { id, model, analyze(input) }`;
 `GeminiAnalyzer` over plain `fetch` (key in the `x-goog-api-key` header, one model, no tools/grounding,
@@ -187,10 +241,10 @@ The `gemini-3.6-flash` result for 785772 above is superseded: it must be redone 
   links, e-mail, messaging apps and off-platform payment stay blocked, and a phone cannot hide inside an amount or
   date (a test caught and led to fixing one such bypass). 247 tests pass.
 
-**Still pending:** Don removes the stray prefix from `TELEGRAM_BOT_TOKEN` in `.env`; then
-`npm run notify:analyses -- --only 99freelas:785772` (once, and again to confirm zero resends); retry of the 17
-pending and the 3 failed after the quota resets (the 3 failures were produced under the old guard); Don's review of
-the candidate profile; Tech Lead review. No application was made.
+**Resolved afterwards:** the token was corrected in `.env` and the saved analysis was delivered (historical note; the
+message format has since changed, see SPEC 005). **Still open:** retry of the pending and failed analyses after the quota
+resets (the failures were produced under the old guard) and the owner's confirmation of the candidate skill levels.
+No application was made.
 
 **Skill levels need the owner's confirmation:** `src/profile/bruno-candidate.ts` derives confirmed/learning/
 unavailable skills from the approved interest profile (React = learning/basic; native mobile, private AI,
@@ -336,10 +390,7 @@ from earlier runs are notified (not only those discovered in the current run).
 
 ## Technical debt (accepted by the Tech Lead, non-blocking)
 
-1. **Deferred items are not persisted.** Unseen summaries beyond `MAX_DETAILS_PER_RUN` are only reported
-   as "deferred". They could leave the configured discovery window (`DISCOVERY_MAX_PAGES` newest pages)
-   before the next run and never be detailed. A **persistent discovery queue** should be considered
-   before any scheduled, autonomous operation.
+1. ~~Deferred items are not persisted.~~ Resolved by SPEC 005 (persistent discovery queue).
 2. **Configuration is loaded globally.** An invalid `DISCOVERY_*` value also breaks commands that do not
    discover anything (`npm run opportunities`, `npm run telegram:test`). Decouple it before or during
    the scheduler milestone.
@@ -360,20 +411,19 @@ from earlier runs are notified (not only those discovered in the current run).
 - Discovery reads at most `DISCOVERY_MAX_PAGES` (default 5) pages per run, so older opportunities are
   reached progressively (backfill) and deep history is never guaranteed. A large value costs one
   request per page plus one per detail, spaced ~1.5 s apart.
-- Deferred items are not stored: they are found again next run only while they remain within the pages
-  scanned; if newer items push them out of range they can be missed.
+- Deferred items are now stored in the discovery queue (SPEC 005) and no longer depend on the scanned pages.
 - Pages shift while a run is in progress; overlap is deduplicated, but an item moving from a not yet
   scanned page to an already scanned one can be missed until a later run.
 - No `closed` status code observed; only "Aberto" budgets interpreted; `node:sqlite` is experimental.
 - Offline tests cover discovery, adapter pagination and configuration; the filter, Telegram client and
   message formatting were verified by ad hoc scripts (not in the repository).
-- Message labels are in English (project rule for UI text) although the SPEC sketched Portuguese ones.
+- Telegram messages are in Portuguese (the only UI-text exception, SPEC 005); everything else stays in English.
 
 ## Blockers / risks
 
 - SPEC 003 is closed (`b0495bc`); SPEC 003.1 is approved and committed (`157df4c`).
-- **SPEC 004 is waiting on a human step:** put `GEMINI_API_KEY` (and `AI_ENABLED=true`) in the local `.env`
-  for the live Gemini acceptance. Until then nothing has called Gemini.
+- SPEC 004 is committed (`4aa3f07`) and its real Gemini and Telegram acceptance succeeded. The SPEC 005 quota controls
+  have only been exercised with a simulation; the first real use will be the next real AI run.
 - AI limits to keep in mind: free-tier quotas are set by Google and can change; a 429 ends the run's batch.
   The proposal guard is intentionally blunt and may reject a harmless proposal (it is retried next run).
 - `data/job-sniper.db` holds real data from the live site (git-ignored).
@@ -385,5 +435,6 @@ from earlier runs are notified (not only those discovered in the current run).
 
 ## Next authorized mission
 
-**SPEC 004 — AI + analysis + assisted proposal.** Implemented; live Gemini acceptance and Tech Lead review
-pending. Nothing further (dashboard, scheduler, second source, auto-apply) has been started.
+**SPEC 005 — Readable Telegram, persistent queue, quota control.** Implemented and accepted live within limits;
+Tech Lead review pending before its commit. Nothing further (dashboard, scheduler, second source, auto-apply,
+interactive buttons) has been started.

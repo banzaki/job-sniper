@@ -14,6 +14,8 @@
     "analyses": "tsx src/cli/analyses.ts",
     "access:refresh": "tsx src/cli/refresh-access.ts",
     "notify:analyses": "tsx src/cli/notify-analyses.ts",
+    "notify:demo": "tsx src/cli/notify-demo.ts",
+    "collect": "tsx src/cli/collect.ts",
     "telegram:test": "tsx src/cli/telegram-test.ts"
   },
   "keywords": [],

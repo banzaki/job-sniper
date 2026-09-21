@@ -1,4 +1,4 @@
-import { SourceBlockedError, SourceResponseError } from '../source-errors.js';
+import { SourceBlockedError, SourceNotFoundError, SourceResponseError } from '../source-errors.js';
 
 export const BASE_URL = 'https://www.99freelas.com.br';
 
@@ -65,6 +65,9 @@ export class Freelas99Client implements HtmlFetcher {
     }
     if (response.headers.get('cf-mitigated')) {
       throw new SourceBlockedError(`Bot-protection challenge detected for ${url}; stopping.`);
+    }
+    if (response.status === 404 || response.status === 410) {
+      throw new SourceNotFoundError(`HTTP ${response.status} from ${url}: the page does not exist or is not accessible.`);
     }
     if (!response.ok) {
       throw new SourceResponseError(`Unexpected HTTP ${response.status} from ${url}.`);
