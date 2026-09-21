@@ -12,9 +12,9 @@ import { formatOpportunityMessage, recencyLine } from './format-message.js';
 import { visibleLength } from './html.js';
 import type { Notifier, SendOptions } from './notifier.js';
 import { notifyPending } from './notify-pending.js';
-import { SOURCE_LABELS, SOURCE_NOTES } from './source-labels.js';
+import { SOURCE_LABELS } from './source-labels.js';
 
-const OPTIONS = { sourceLabels: SOURCE_LABELS, sourceNotes: SOURCE_NOTES };
+const OPTIONS = { sourceLabels: SOURCE_LABELS };
 const FETCHED = '2026-09-21T12:00:00.000Z';
 
 const remotiveJob = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
@@ -34,53 +34,49 @@ const remotiveJob = (over: Record<string, unknown> = {}): Record<string, unknown
 const collected = (over: Record<string, unknown> = {}): Opportunity => toOpportunity(remotiveJob(over) as never, { feedFetchedAt: FETCHED })!;
 const TODAY = new Date('2026-09-21T15:00:00.000Z');
 const message = (opportunity: Opportunity, preview = false, now = TODAY) =>
-  formatOpportunityMessage(opportunity, evaluateOpportunity(opportunity, donBrunoProfile, NOW), { ...OPTIONS, now, ...(preview ? { preview: true } : {}) });
+  formatOpportunityMessage(opportunity, evaluateOpportunity(opportunity, donBrunoProfile, NOW), { ...OPTIONS, now, ...(preview ? { kind: 'preview' as const } : {}) });
 
-test('the job message is one compact pt-BR message with everything asked for and nothing invented', () => {
+test('the job message follows the shared layout: pay as published, type and required location, one summary, the link', () => {
   const text = message(collected());
   assert.ok(visibleLength(text) <= 1000, `${visibleLength(text)} characters`);
-  for (const expected of [
-    '<b>🟢 SELECIONADA</b>',
-    '<b>React Developer</b>',
-    'Fonte: Remotive · Acme Studio',
-    '🆕 Publicada há 1 dia',
-    'Contratação: Freelance',
-    'Localização exigida: Worldwide',
-    'Remuneração (como publicada): $50k - $70k',
-    'We are building a marketing site and need help with a responsive landing page.',
-    '🔗 <a href="https://remotive.com/remote-jobs/software-dev/react-developer-4242">Abrir na Remotive</a>',
-  ]) {
-    assert.ok(text.includes(expected), `missing: ${expected}`);
-  }
-  assert.ok(!text.includes('More details follow'), 'one sentence only');
-  assert.ok(!/score|nota|preço sugerido|proposta|rascunho|orçamento|\/100|confiança/i.test(text), 'no score, suggested price, proposal or budget');
+  const blocks = text.split('\n\n');
+  assert.equal(blocks[0], '<b>🚨 NOVA OPORTUNIDADE</b>');
+  assert.equal(blocks[1], '<b>🟢 BOA OPORTUNIDADE</b>');
+  assert.equal(blocks[2], '<b>React Developer</b>\n🌐 Remotive · 🆕 Publicada há 1 dia');
+  assert.ok(blocks[3]!.startsWith('💰 Remuneração (como publicada): $50k - $70k\n🧰 Tipo: Freelance\n📍 Localização exigida: Worldwide\n'));
+  assert.ok(blocks[3]!.endsWith('🎯 Compatibilidade: alta'));
+  assert.ok(blocks[4]!.startsWith('<b>📝 O projeto</b>\nWe are building a marketing site and need help with a responsive landing page.'));
+  assert.ok(blocks.at(-1)!.startsWith('🔗 <a href="https://remotive.com/remote-jobs/software-dev/react-developer-4242">Abrir oportunidade</a>'));
+  assert.ok(!/score|nota|preço sugerido|proposta|rascunho|orçamento|\/100|confiança|Esforço/i.test(text), 'no score, suggested price, effort, proposal or budget');
   assert.ok(!/próximas mensagens/i.test(text));
   assert.ok(!/atraso|24 ?h/i.test(text), 'the feed delay is documented, not repeated in every alert');
+  assert.ok(!/PRÉVIA|não é um alerta novo/.test(text), 'a real opportunity never carries preview text');
 });
 
 test('the pay is shown exactly as published and never called a budget; a missing value says so', () => {
-  assert.ok(message(collected({ salary: '€60,000/year' })).includes('Remuneração (como publicada): €60,000/year'));
-  assert.ok(message(collected({ salary: '' })).includes('Remuneração (como publicada): não informada'));
+  assert.ok(message(collected({ salary: '€60,000/year' })).includes('💰 Remuneração (como publicada): €60,000/year'));
+  assert.ok(message(collected({ salary: '' })).includes('💰 Remuneração (como publicada): não informada'));
   assert.ok(!/orçamento/i.test(message(collected({ salary: '$120k' }))), 'an annual salary is not a project budget');
 });
 
 test('type and location are shown as published, and a missing type is never shown as freelance', () => {
-  assert.ok(message(collected()).includes('Contratação: Freelance'));
-  assert.ok(message(collected({ job_type: 'contract' })).includes('Contratação: Contrato'), 'a stored contract is still labeled as a contract');
+  assert.ok(message(collected()).includes('🧰 Tipo: Freelance'));
+  assert.ok(message(collected({ job_type: 'contract' })).includes('🧰 Tipo: Contrato'), 'a stored contract is still labeled as a contract');
   const unknown = message(collected({ job_type: '' }));
-  assert.ok(unknown.includes('Contratação: não informado'));
+  assert.ok(unknown.includes('🧰 Tipo: não informado'));
   assert.ok(!unknown.includes('Freelance'));
-  assert.ok(message(collected({ job_type: 'temporary' })).includes('Contratação: temporary'));
-  assert.ok(message(collected({ candidate_required_location: '' })).includes('Localização exigida: não informada'));
+  assert.ok(message(collected({ job_type: 'temporary' })).includes('🧰 Tipo: temporary'));
+  assert.ok(message(collected({ candidate_required_location: '' })).includes('📍 Localização exigida: não informada'));
 });
 
-test('the main caveat is the most relevant one, translated: location, then type, then seniority', () => {
+test('Atenção holds the main caveat only, translated: location, then type, then seniority', () => {
   const remote = message(collected({ candidate_required_location: 'Remote' }));
-  assert.ok(remote.startsWith('<b>🟡 PARA REVISAR</b>'));
-  assert.ok(remote.includes('⚠️ localização &quot;Remote&quot; é ambígua para quem mora no Brasil'));
-  assert.ok(message(collected({ job_type: '' })).includes('⚠️ tipo de contratação não informado'));
-  assert.ok(message(collected({ title: 'Senior React Developer' })).includes('⚠️ senioridade no título: senior'));
-  assert.ok(!message(collected()).includes('⚠️'), 'no caveat line when there is none');
+  assert.ok(remote.includes('<b>🟡 VALE REVISAR</b>'));
+  assert.ok(remote.includes('<b>⚠️ Atenção</b>\nLocalização &quot;Remote&quot; é ambígua para quem mora no Brasil.'));
+  assert.ok(message(collected({ job_type: '' })).includes('<b>⚠️ Atenção</b>\nTipo de contratação não informado.'));
+  assert.ok(message(collected({ title: 'Senior React Developer' })).includes('<b>⚠️ Atenção</b>\nSenioridade no título: senior.'));
+  assert.ok(!message(collected()).includes('Atenção'), 'no caveat, no block');
+  assert.equal((remote.match(/Atenção/g) ?? []).length, 1);
 });
 
 test('a very long title, company, location, pay and description still fit the ceiling, with the link intact', () => {
@@ -94,7 +90,7 @@ test('a very long title, company, location, pay and description still fit the ce
   for (const preview of [false, true]) {
     const text = message(long, preview);
     assert.ok(visibleLength(text) <= 1000, `${visibleLength(text)} characters`);
-    assert.match(text, /Abrir na Remotive<\/a>$/);
+    assert.match(text, /Abrir oportunidade<\/a>$/);
     assert.equal((text.match(/<b>/g) ?? []).length, (text.match(/<\/b>/g) ?? []).length, 'no tag was cut');
   }
 });
@@ -102,20 +98,19 @@ test('a very long title, company, location, pay and description still fit the ce
 test('external text is escaped, and only a safe link is linked', () => {
   const text = message(collected({ title: '<b>Dev</b> & "co"', company_name: '<i>Acme</i>' }));
   assert.ok(text.includes('&lt;b&gt;Dev&lt;/b&gt; &amp; &quot;co&quot;'));
-  assert.ok(text.includes('&lt;i&gt;Acme&lt;/i&gt;'));
   const unsafe: Opportunity = { ...collected(), url: 'javascript:alert(1)' };
   assert.ok(!message(unsafe).includes('href='));
 });
 
-test('the preview is identified, and the project layout of the other source is unchanged', () => {
-  assert.ok(message(collected(), true).startsWith('🧪 <b>PRÉVIA</b> · não é um alerta novo\n\n<b>🟢 SELECIONADA</b>'));
+test('the preview is identified, and the project layout of the other source is unchanged in kind', () => {
+  assert.ok(message(collected(), true).startsWith('<b>🧪 PRÉVIA DE FORMATO</b>\n\n<b>🟢 BOA OPORTUNIDADE</b>'));
   assert.ok(!message(collected()).includes('PRÉVIA'));
 
   const project = makeOpportunity('7', { title: 'Landing page' });
-  const text = formatOpportunityMessage(project, { decision: 'review', reasons: ['strong signals: HTML'], matchedKeywords: ['HTML'], evaluatedAt: 'e', ruleVersion: 'basic-v3' }, OPTIONS);
-  assert.match(text, /Orçamento do cliente: em aberto \(sem valor informado\)/);
-  assert.match(text, /Propostas: 1 · Interessados: 2/);
-  assert.ok(!text.includes('Fonte com atraso'));
+  const text = formatOpportunityMessage(project, { decision: 'review', reasons: ['strong signals: HTML'], matchedKeywords: ['HTML'], evaluatedAt: 'e', ruleVersion: 'basic-v5' }, OPTIONS);
+  assert.match(text, /💰 Orçamento: em aberto \(sem valor informado\)/);
+  assert.match(text, /👥 Concorrência: 1 proposta/);
+  assert.ok(!text.includes('Remuneração'));
 });
 
 // ---------- delivery ----------
@@ -150,8 +145,8 @@ test('a preview of an opportunity without analysis uses the basic message, is de
   const first = await demo(store, notifier);
   assert.equal(first.partsSent, 1);
   assert.equal(first.complete, true);
-  assert.ok(sent[1]!.text.startsWith('🧪 <b>PRÉVIA</b>'));
-  assert.ok(!/score|preço sugerido|proposta/i.test(sent[1]!.text));
+  assert.ok(sent[1]!.text.startsWith('<b>🧪 PRÉVIA DE FORMATO</b>'));
+  assert.ok(!/score|preço sugerido|esforço|rascunho/i.test(sent[1]!.text));
 
   const second = await demo(store, notifier);
   assert.equal(second.partsSent, 0, 'the repeat sends nothing');
@@ -174,7 +169,9 @@ test('the regular notification sends the compact job message once and marks it',
   const first = await run();
   assert.equal(first.sent, 1);
   assert.equal(sent.length, 1);
-  assert.ok(sent[0]!.text.includes('Fonte: Remotive'));
+  assert.ok(sent[0]!.text.includes('🌐 Remotive'));
+  assert.ok(sent[0]!.text.startsWith('<b>🚨 NOVA OPORTUNIDADE</b>'));
+  assert.ok(!/PRÉVIA|não é um alerta novo/.test(sent[0]!.text), 'a real alert is never marked as a preview');
   assert.ok(store.get(key)!.notifiedAt);
   assert.equal((await run()).pending, 0);
   assert.equal(sent.length, 1, 'no resend');
@@ -216,7 +213,7 @@ test('a row stored before publishedDay existed is still read from its raw, zone-
 });
 
 test('the recency line is shown in the alert and in the preview', () => {
-  assert.ok(message(withDate('2026-09-18T16:43:22')).includes('Fonte: Remotive · Acme Studio\n🆕 Publicada há 3 dias\nContratação:'));
+  assert.ok(message(withDate('2026-09-18T16:43:22')).includes('🌐 Remotive · 🆕 Publicada há 3 dias'));
   assert.ok(message(withDate('2026-09-18T16:43:22'), true).includes('🆕 Publicada há 3 dias'));
   assert.ok(visibleLength(message(withDate('2026-09-18T16:43:22'), true)) <= 1000);
 });

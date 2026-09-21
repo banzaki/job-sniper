@@ -69,7 +69,6 @@ export interface DemoOptions {
   dryRun: boolean;
   candidate?: CandidateProfile;
   sourceLabels?: Readonly<Record<string, string>>;
-  sourceNotes?: Readonly<Record<string, string>>;
   now?: () => Date;
 }
 
@@ -111,10 +110,9 @@ export async function deliverDemo(options: DemoOptions): Promise<DemoReport> {
           label: 'Mensagem',
           silent: false,
           text: formatOpportunityMessage(stored.opportunity, stored.filter, {
-            preview: true,
+            kind: 'preview',
             now: now(),
             ...(options.sourceLabels ? { sourceLabels: options.sourceLabels } : {}),
-            ...(options.sourceNotes ? { sourceNotes: options.sourceNotes } : {}),
           }),
         };
 

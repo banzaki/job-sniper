@@ -1,4 +1,4 @@
-import { SOURCE_LABELS, SOURCE_NOTES } from '../notify/source-labels.js';
+import { SOURCE_LABELS } from '../notify/source-labels.js';
 import { ANALYSIS_VERSION } from '../ai/current-version.js';
 import { ConfigError, loadAppConfig } from '../config.js';
 import type { OpportunityKey } from '../domain/opportunity.js';
@@ -43,7 +43,6 @@ async function main(): Promise<number> {
       dryRun: config.dryRun,
       candidate: brunoCandidate,
       sourceLabels: SOURCE_LABELS,
-      sourceNotes: SOURCE_NOTES,
     });
     console.log(
       config.dryRun

@@ -1,4 +1,4 @@
-import { SOURCE_LABELS, SOURCE_NOTES } from '../notify/source-labels.js';
+import { SOURCE_LABELS } from '../notify/source-labels.js';
 import { AI_SOURCE_IDS, ANALYSIS_VERSION } from '../ai/current-version.js';
 import { ConfigError, loadAppConfig } from '../config.js';
 import type { MatchAnalysis } from '../domain/match-analysis.js';

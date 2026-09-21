@@ -53,7 +53,8 @@ test('the demo is delivered once as a separate delivery and leaves every product
   assert.equal(first.partsSent, 1);
   assert.equal(first.complete, true);
   assert.equal(sent.length, 1, 'one message');
-  assert.match(sent[0]!.text, /^🧪 <b>PRÉVIA<\/b> · formato compacto, não é um alerta novo/);
+  assert.match(sent[0]!.text, /^<b>🧪 PRÉVIA DE FORMATO<\/b>\n\n/);
+  assert.ok(!/NOVA OPORTUNIDADE|não é um alerta novo/.test(sent[0]!.text));
   assert.equal(sent[0]!.silent, false);
 
   assert.equal(store.get(key)!.notifiedAt, before.opportunity, 'opportunity flag untouched');
@@ -138,9 +139,9 @@ test('the demo needs a stored opportunity; without an analysis it previews the b
   const { notifier, sent } = recorder();
   const report = await demo(store, notifier);
   assert.equal(report.partsSent, 1);
-  assert.match(sent[0]!.text, /^🧪 <b>PRÉVIA<\/b> · não é um alerta novo/);
-  assert.match(sent[0]!.text, /Orçamento do cliente/, 'the basic message, with no score, price or proposal');
-  assert.ok(!/Preço sugerido|Rascunho|Compatibilidade/.test(sent[0]!.text));
+  assert.match(sent[0]!.text, /^<b>🧪 PRÉVIA DE FORMATO<\/b>\n\n/);
+  assert.match(sent[0]!.text, /💰 Orçamento/, 'the basic message, with no score, price or proposal');
+  assert.ok(!/Preço sugerido|Rascunho|Esforço/.test(sent[0]!.text));
 });
 
 test('the channel\'s message ids are stored with each confirmed part', async () => {

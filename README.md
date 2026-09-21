@@ -203,22 +203,53 @@ Set the key only in your local `.env` (`GEMINI_API_KEY=`); never paste it in cha
 
 ## Telegram messages (Portuguese)
 
-The text sent to Telegram is in Brazilian Portuguese (the code and everything else stay in English). The message is
-built only from stored data; the AI is never called to format it. Each opportunity with an AI analysis gets **one**
-compact message (aim: 600-900 visible characters, ceiling 1000), with:
+The text sent to Telegram is in Brazilian Portuguese (the code and everything else stay in English). Every alert is **one compact
+message** (under 1,000 visible characters) in the same visual layout, built only from stored data; the AI is never called to format it:
 
-1. the classification (`🟢 VALE CANDIDATAR-SE`, `🟡 VALE REVISAR`, `🕒 AGUARDAR LIBERAÇÃO`, `🔴 NÃO VALE A PENA`) and the title;
-2. the platform;
-3. one short sentence about the work;
-4. the price suggested by the AI, kept apart from the client's budget, and the estimated effort;
-5. the main caveat (unverified essential skills first, otherwise the AI's first risk);
-6. availability as of the last check, never stated as confirmed ("estimated release, confirm on the site");
-7. the link to open the project.
+```text
+🚨 NOVA OPORTUNIDADE
 
-There is no proposal, no skill list, no internal explanation, no second automatic message and no "details in the next
-messages". The complete analysis and the proposal draft stay in the database; read them with
-`npm run analyses -- --details --proposals` (`--messages` shows the message as it would be sent). Interactive buttons
-are not implemented. Over-long fields are shortened in steps; a tag or link is never cut.
+🟢 BOA OPORTUNIDADE
+
+Título
+🌐 Freelancer.com · 🆕 Publicada hoje
+
+💰 Orçamento: INR 12.500–37.500
+👥 Concorrência: 12 propostas
+🧰 Tipo: preço fixo
+🎯 Compatibilidade: alta
+
+📝 O projeto
+Resumo curto, com no máximo duas frases.
+
+🤖 Como a IA pode ajudar
+Acelerar a estrutura inicial, os componentes e a revisão responsiva. Você ainda controla briefing, decisões e entrega.
+
+⚠️ Atenção
+Principal ressalva relevante.
+
+🔗 Abrir oportunidade
+```
+
+- **Header** says why the message exists: `🚨 NOVA OPORTUNIDADE` (a real new opportunity), `🧪 PRÉVIA DE FORMATO` (a manual preview only) or
+  `🔄 ANÁLISE ATUALIZADA` (an older opportunity whose analysis arrived later). A real opportunity never carries preview wording.
+- **Classification:** `🟢 BOA OPORTUNIDADE` (shortlist or an AI "apply"), `🟡 VALE REVISAR` (review), `🕒 AGUARDAR LIBERAÇÃO` and `🔴 NÃO VALE A PENA` (AI only).
+- **Facts:** the client's budget in its original currency (never converted, never called a suggested price), competition, fixed or hourly, at most
+  four relevant skills (only those the filter found, only when there are any), and the compatibility in words (the current deterministic filter:
+  high, medium or low). For a jobs source (Remotive) the facts are the pay as published, the type and the required location.
+- **Effort and suggested price appear only when a saved AI analysis exists**, and never otherwise. Nothing is invented.
+- **📝 O projeto** is the first *substantive* stretch of the description, at most two short sentences, in the author's own words: greetings
+  ("Hello!", "Hi there", "Olá", "Bom dia", "Dear freelancer"), labels ("Descrição:", "Project description", "Objective", numbering), very short lines
+  (under about 30 characters), generic headings and pleasantries are skipped. With nothing useful the block is omitted.
+- **🤖 Como a IA pode ajudar** is one fixed sentence chosen by rules from what the title and description say (WordPress, front-end named
+  technologies, automation or bots, API or integration, bug fixes, or a plainly stated request to build a site). It describes what AI can speed
+  up and never says the person masters the skill. Skill tags alone never create it; with no clear or safe signal (advanced scope, skills only in
+  tags, a skipped project) the block is omitted.
+- **⚠️ Atenção** holds only the single main caveat, by priority: restricted access, project language, advanced scope, high competition (61+
+  proposals on a marketplace), then the most relevant stored reason (location, type, seniority, skills only in tags, unverified skills).
+- The complete analysis and the proposal draft stay in the database; read them with `npm run analyses -- --details --proposals`
+  (`--messages` shows the message as it would be sent). Interactive buttons are not implemented. Over-long fields are shortened in steps;
+  a tag or link is never cut, and all external text is HTML-escaped.
 
 **Delivery state.** The message is stored (`deliveries`, `delivery_parts`) before sending and receives the Telegram
 `message_id` once confirmed. The analysis is marked notified only after confirmation, and a message already confirmed is
@@ -233,10 +264,9 @@ format. The notification report lists these cases.
 after sending), the program cannot know. It is recorded as *ambiguous* and reported, and it is retried on the next run,
 so in rare cases one message may appear twice. It is never silently dropped.
 
-`npm run notify:demo -- --id <sourceId:externalId> [--label x]` sends **one** identified preview ("🧪 PRÉVIA") of a
-saved analysis (no AI, no site access). It is stored as its own delivery, so it never marks the real notification, and
-repeating it with the same label sends nothing new. With `DRY_RUN=true` it only prints and writes nothing. An opportunity
-that has no analysis (every Remotive job) is previewed with its basic message, prefixed "🧪 PRÉVIA".
+`npm run notify:demo -- --id <sourceId:externalId> [--label x]` sends **one** message with the header "🧪 PRÉVIA DE FORMATO" for a
+saved opportunity (its saved analysis if it has one, otherwise its basic message; no AI, no site access). It is stored as its own delivery, so it
+never marks the real notification, and repeating it with the same label sends nothing new. With `DRY_RUN=true` it only prints and writes nothing.
 
 **Ranking and limit.** Everything is stored, but a run sends at most `MAX_TELEGRAM_ALERTS_PER_RUN` (5) Telegram alerts **in total, across all
 sources**. Owed alerts are ranked first: (1) shortlist before review; (2) crowding tier of a project marketplace: up to 20 proposals is
@@ -246,18 +276,7 @@ order. What does not fit stays **pending and unmarked** and is sent by a later r
 and does not use a slot. A freelance project with **more than 150 proposals** is stored but never alerted automatically, and a project in a
 language outside the profile languages (`pt`, `en`) is at most a review. The 99Freelas decisions are not touched by these rules.
 
-**Projects from Freelancer.com** use one compact message too: classification, title, source, "🆕 Publicada há X dias" (calendar days in
-Brasília time, only up to 7 days), the client's budget in its **original currency** ("US$ 250–500", "INR 12.500–37.500", "R$ ..."; never
-converted), fixed or hourly, number of proposals, up to four skills, a one-sentence summary, the main caveat and the original link. The
-client's budget is never called a suggested price, and there is no score or proposal.
-
-**Jobs from Remotive** are announced with one compact message (at most 1,000 characters) built only from the collected data
-and the basic filter: classification, title, source and company, hiring type, required location, pay **as published** (never
-converted, never called a budget), a one-sentence summary, the main caveat and the original Remotive link. When the publication
-date is reliable and at most 7 days old it adds "🆕 Publicada há X dias" (calendar days only; a date without a time zone gives just
-its day, and no time of day is ever shown); an older or unknown date gets no highlight. There is no score, suggested price or proposal, because none was produced.
-
-## Filter (`basic-v3`)
+## Filter (`basic-v5`)
 
 Deterministic, no AI. Every decision carries concrete reasons, the matched terms and the rule
 version. Signals are searched in title, description and skills:

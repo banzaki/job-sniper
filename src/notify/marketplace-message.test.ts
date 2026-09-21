@@ -36,39 +36,36 @@ const raw = (over: Record<string, unknown> = {}) => ({
 });
 const project = (over: Record<string, unknown> = {}, fetchedAt = NOW.toISOString()): Opportunity => toOpportunity(raw(over) as never, fetchedAt)!;
 const judged = (opportunity: Opportunity) => evaluateOpportunity(opportunity, donBrunoProfile, NOW);
-const message = (opportunity: Opportunity, preview = false) => formatOpportunityMessage(opportunity, judged(opportunity), { ...OPTIONS, ...(preview ? { preview: true } : {}) });
+const message = (opportunity: Opportunity, preview = false) => formatOpportunityMessage(opportunity, judged(opportunity), { ...OPTIONS, ...(preview ? { kind: 'preview' as const } : {}) });
 
-test('the project message is compact pt-BR: source, recency, budget with its currency and kind, proposals, a few skills, summary and link', () => {
+test('the project message follows the shared layout: source, recency, budget with its currency, competition, type, skills, summary and link', () => {
   const text = message(project());
   assert.ok(visibleLength(text) <= 1000, `${visibleLength(text)} characters`);
-  for (const expected of [
-    '<b>🟢 SELECIONADA</b>',
-    '<b>Responsive landing page in React</b>',
-    'Fonte: Freelancer.com',
-    '🆕 Publicada há 1 dia',
-    'Orçamento do cliente: US$ 250–500',
-    'Tipo: preço fixo',
-    'Propostas: 14',
-    'Habilidades: React.js, HTML, CSS',
-    'We need a responsive landing page built in React with clean HTML and CSS.',
-    '🔗 <a href="https://www.freelancer.com/projects/website-design/Responsive-landing-page-React-40725001">Abrir na Freelancer.com</a>',
-  ]) {
-    assert.ok(text.includes(expected), `missing: ${expected}`);
-  }
-  assert.ok(!/Delivery within two weeks/.test(text), 'one sentence only');
-  assert.ok(!/preço sugerido|sugerid|proposta completa|rascunho|score|\/100/i.test(text), 'the client budget is never a suggested price, and nothing is invented');
+  const blocks = text.split('\n\n');
+  assert.equal(blocks[0], '<b>🚨 NOVA OPORTUNIDADE</b>');
+  assert.equal(blocks[1], '<b>🟢 BOA OPORTUNIDADE</b>');
+  assert.equal(blocks[2], '<b>Responsive landing page in React</b>\n🌐 Freelancer.com · 🆕 Publicada há 1 dia');
+  const facts = blocks[3]!.split('\n');
+  assert.deepEqual(facts.slice(0, 3), ['💰 Orçamento: US$ 250–500', '👥 Concorrência: 14 propostas', '🧰 Tipo: preço fixo']);
+  assert.ok(facts[3]!.startsWith('🧩 Habilidades: ') && facts[3]!.split(', ').length <= 4, 'at most four skills');
+  assert.equal(facts.at(-1), '🎯 Compatibilidade: alta');
+  assert.ok(blocks[4]!.startsWith('<b>📝 O projeto</b>\nWe need a responsive landing page built in React with clean HTML and CSS.'));
+  assert.ok(blocks[5]!.startsWith('<b>🤖 Como a IA pode ajudar</b>\nAcelerar a estrutura inicial'));
+  assert.equal(blocks.at(-1), '🔗 <a href="https://www.freelancer.com/projects/website-design/Responsive-landing-page-React-40725001">Abrir oportunidade</a>');
+  assert.ok(!/preço sugerido|sugerid|rascunho|score|\/100|Esforço|⏱/i.test(text), 'the client budget is never a suggested price, and no effort or score is invented');
+  assert.ok(!/PRÉVIA|não é um alerta novo/.test(text), 'a real opportunity never carries preview text');
   assert.ok(!/próximas mensagens/i.test(text));
 });
 
 test('every currency keeps its own code, amounts are never converted, and hourly projects say so', () => {
-  assert.ok(message(project({ currency: { code: 'AUD', id: 3 }, budget: { minimum: 250, maximum: 750 } })).includes('Orçamento do cliente: AUD 250–750'));
-  assert.ok(message(project({ currency: { code: 'EUR', id: 8 }, budget: { minimum: 30, maximum: 250 } })).includes('Orçamento do cliente: EUR 30–250'));
-  assert.ok(message(project({ currency: { code: 'BRL', id: 9 }, budget: { minimum: 1500, maximum: 2500 } })).includes('Orçamento do cliente: R$ 1.500–2.500'));
+  assert.ok(message(project({ currency: { code: 'AUD', id: 3 }, budget: { minimum: 250, maximum: 750 } })).includes('💰 Orçamento: AUD 250–750'));
+  assert.ok(message(project({ currency: { code: 'EUR', id: 8 }, budget: { minimum: 30, maximum: 250 } })).includes('💰 Orçamento: EUR 30–250'));
+  assert.ok(message(project({ currency: { code: 'BRL', id: 9 }, budget: { minimum: 1500, maximum: 2500 } })).includes('💰 Orçamento: R$ 1.500–2.500'));
   const hourly = message(project({ type: 'hourly', currency: { code: 'USD', id: 1 }, budget: { minimum: 15, maximum: 25 } }));
-  assert.ok(hourly.includes('Orçamento do cliente: US$ 15–25'));
-  assert.ok(hourly.includes('Tipo: por hora'));
+  assert.ok(hourly.includes('💰 Orçamento: US$ 15–25\n'));
+  assert.ok(hourly.includes('🧰 Tipo: por hora'));
   assert.ok(message(project({ type: 'hourly', budget: { minimum: 50, maximum: null } })).includes('a partir de US$ 50'));
-  assert.ok(message(project({ budget: { minimum: null, maximum: null } })).includes('Orçamento do cliente: não informado'));
+  assert.ok(message(project({ budget: { minimum: null, maximum: null } })).includes('💰 Orçamento: não informado'));
   assert.ok(!/R\$/.test(message(project())), 'a USD budget never shows as reais');
 });
 
@@ -100,7 +97,7 @@ test('the message stays under the ceiling with very long fields, and text from t
   for (const preview of [false, true]) {
     const text = message(long, preview);
     assert.ok(visibleLength(text) <= 1000, `${visibleLength(text)}`);
-    assert.match(text, /Abrir na Freelancer\.com<\/a>$/);
+    assert.match(text, /Abrir oportunidade<\/a>$/);
     assert.equal((text.match(/<b>/g) ?? []).length, (text.match(/<\/b>/g) ?? []).length);
   }
   const escaped = message(project({ title: '<script>alert(1)</script> & "x"', description: 'Text <img src=x onerror=alert(1)> & more.' }));
@@ -122,9 +119,9 @@ test('the filter keeps a defined technology project and stores, without alerting
 test('a 99Freelas project is filtered and formatted exactly as before', () => {
   const p = makeOpportunity('7', { title: 'Landing page', budget: { currency: 'BRL', kind: 'fixed', min: 1500, max: 2500 } });
   const text = formatOpportunityMessage(p, judged(p), OPTIONS);
-  assert.match(text, /Orçamento do cliente: R\$ 1\.500–2\.500/);
-  assert.match(text, /Propostas: 1 · Interessados: 2/);
-  assert.ok(!text.includes('Tipo:'));
+  assert.match(text, /💰 Orçamento: R\$ 1\.500–2\.500/);
+  assert.match(text, /👥 Concorrência: 1 proposta/);
+  assert.ok(!text.includes('Remuneração'), 'no job-layout facts');
 });
 
 // ---------- delivery: preview, once, and data freshness ----------
@@ -146,7 +143,8 @@ test('the preview is delivered once, identified, and leaves the real notificatio
   const { notifier, sent } = recorder();
   const demo = () => deliverDemo({ store, notifier, key, analysisVersion: ANALYSIS_VERSION, label: 'preview', dryRun: false, now: () => NOW, sourceLabels: SOURCE_LABELS });
   assert.equal((await demo()).partsSent, 1);
-  assert.match(sent[0]!, /^🧪 <b>PRÉVIA<\/b> · não é um alerta novo/);
+  assert.match(sent[0]!, /^<b>🧪 PRÉVIA DE FORMATO<\/b>\n\n/);
+  assert.ok(!/NOVA OPORTUNIDADE|não é um alerta novo/.test(sent[0]!));
   assert.equal((await demo()).partsSent, 0, 'the repeat sends nothing');
   assert.equal(sent.length, 1);
   assert.equal(store.get(key)!.notifiedAt, null);

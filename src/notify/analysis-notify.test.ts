@@ -56,8 +56,9 @@ test('a new opportunity with an analysis gets ONE compact message, with sound; b
   const report = await notify(store, notifier);
   assert.equal(notifier.sent.length, 1, 'exactly one message per opportunity');
   assert.equal(notifier.sent[0]!.silent, false);
-  assert.match(notifier.sent[0]!.text, /VALE CANDIDATAR-SE/);
-  assert.ok(!notifier.sent[0]!.text.includes('análise atualizada'));
+  assert.match(notifier.sent[0]!.text, /BOA OPORTUNIDADE/);
+  assert.ok(!/ANÁLISE ATUALIZADA|PRÉVIA/.test(notifier.sent[0]!.text));
+  assert.ok(notifier.sent[0]!.text.startsWith('<b>🚨 NOVA OPORTUNIDADE</b>'));
   assert.ok(visibleLength(notifier.sent[0]!.text) <= COMPACT_CEILING);
   assert.ok(!/próximas mensagens|Detalhes|Rascunho/.test(notifier.sent[0]!.text));
   assert.deepEqual(report.kinds, { basic: 0, enriched: 1, aiUpdate: 0 });
@@ -78,7 +79,7 @@ test('a new opportunity with an analysis gets ONE compact message, with sound; b
   assert.equal(notifier.sent.length, 1, 'nothing is sent twice');
 });
 
-test('an analysis of an opportunity notified earlier is delivered once as "análise atualizada"', async () => {
+test('an analysis of an opportunity notified earlier is delivered once as "ANÁLISE ATUALIZADA"', async () => {
   const { store, opportunity } = seed('1');
   store.markNotified(key('1'), '2026-04-30T00:00:00.000Z');
   store.analyses.save(makeAnalysis(opportunity));
@@ -86,7 +87,7 @@ test('an analysis of an opportunity notified earlier is delivered once as "anál
 
   const report = await notify(store, notifier);
   assert.deepEqual(report.kinds, { basic: 0, enriched: 0, aiUpdate: 1 });
-  assert.match(notifier.sent[0]!.text, /análise atualizada/);
+  assert.match(notifier.sent[0]!.text, /🔄 ANÁLISE ATUALIZADA/);
   assert.ok(!/notificad[oa] anteriormente|já foi enviad/i.test(notifier.sent[0]!.text), 'no long explanation about earlier notices');
   assert.equal(store.get(key('1'))!.notifiedAt, '2026-04-30T00:00:00.000Z', 'the first notification state is untouched');
 
@@ -101,8 +102,8 @@ test('without an analysis the basic pt-BR message is sent; the analysis that arr
 
   const first = await notify(store, notifier);
   assert.deepEqual(first.kinds, { basic: 1, enriched: 0, aiUpdate: 0 });
-  assert.match(notifier.sent[0]!.text, /SELECIONADA/);
-  assert.match(notifier.sent[0]!.text, /Motivo: sinais fortes: HTML/);
+  assert.match(notifier.sent[0]!.text, /BOA OPORTUNIDADE|VALE REVISAR/);
+  assert.match(notifier.sent[0]!.text, /🧩 Habilidades: HTML/);
   assert.ok(!/Fit score|Access:|Source:/.test(notifier.sent[0]!.text), 'no English labels');
 
   store.analyses.save(makeAnalysis(opportunity));
@@ -338,7 +339,7 @@ test('a former multi-part delivery of which nothing reached the owner is deliver
   const report = await notify(store, notifier);
   assert.deepEqual(report.legacyDeliveries, [{ id: 'fake:1', partsSent: 0, partsTotal: 2, held: false }]);
   assert.equal(notifier.sent.length, 1);
-  assert.match(notifier.sent[0]!.text, /VALE CANDIDATAR-SE/);
+  assert.match(notifier.sent[0]!.text, /BOA OPORTUNIDADE/);
   assert.ok(!/former format/.test(notifier.sent[0]!.text), 'the old stored parts are never sent');
   assert.deepEqual(store.deliveries.parts(legacy.id).map((part) => part.status), ['pending', 'pending']);
   assert.ok(store.analyses.get(key('1'), ANALYSIS_VERSION)!.notifiedAt);

@@ -26,60 +26,76 @@ function assertBalancedTags(html: string): void {
 const restricted = (id: string, over: Partial<Opportunity> = {}) =>
   makeOpportunity(id, {
     title: 'Landing Page para o PREDPACK',
-    summary: '1. Objetivo Vender o PREDPACK, uma biblioteca de cenas de filmes e séries já cortadas para editores. Precisamos de uma página leve.',
+    description: 'Vender o PREDPACK, uma biblioteca de cenas de filmes e séries já cortadas para editores. Precisamos de uma página leve e rápida.',
     access: { kind: 'premium_only', publicAt: '2026-05-02T19:37:00.000Z', rawLabel: 'Projeto Exclusivo' },
     ...over,
   });
 
-test('one compact message, in the agreed order, from persisted values only', () => {
+test('the analysis message follows the approved layout: blocks separated by blank lines, with the saved effort and price', () => {
   const opportunity = restricted('7');
-  const analysis = makeAnalysis(opportunity, { recommendation: 'review', score: 55, confidence: 'low', effort: { minHours: 12, maxHours: 25 }, price: { minBrl: 600, maxBrl: 1250, rationale: 'Base' }, complexity: 'medium' }, NOW, brunoCandidate);
-  const message = render(opportunity, analysis);
-
-  const expectedOrder = [
-    '<b>🟡 VALE REVISAR</b>',
-    '<b>Landing Page para o PREDPACK</b>',
-    'Plataforma: 99Freelas',
-    'Vender o PREDPACK, uma biblioteca de cenas de filmes e séries já cortadas para editores.',
-    'Preço sugerido pela IA: R$ 600–1.250',
-    'Orçamento do cliente: em aberto (sem valor informado)',
-    'Esforço estimado: 12–25 horas',
-    '⚠️ Competências essenciais ainda não verificadas: HTML, CSS, landing pages',
-    'Disponibilidade: restrita na última consulta (01/05 às 09h00). Liberação estimada: 02/05 às 16h37 (Brasília); confirmar no site.',
-    '🔗 <a href="https://example.test/project/7">Abrir projeto</a>',
-  ];
-  let position = -1;
-  for (const fragment of expectedOrder) {
-    const at = message.text.indexOf(fragment);
-    assert.ok(at > position, `missing or out of order: ${fragment}`);
-    position = at;
-  }
-  assert.equal(message.silent, false);
-  const length = visibleLength(message.text);
-  assert.ok(length >= 400 && length <= 900, `expected roughly 600-900 characters, got ${length}`);
-});
-
-test('the message leaves out the proposal, skill lists, internal explanations and any "next messages" promise', () => {
-  const opportunity = restricted('8');
-  const text = render(opportunity, makeAnalysis(opportunity, {}, NOW, brunoCandidate)).text;
-  assert.ok(!/Olá! Li o briefing|Rascunho|Proposta|✍️/.test(text), 'no proposal');
-  assert.ok(!/Requisitos essenciais|Verificadas:|Lacunas|Perguntas ao cliente|Por que essa nota|Compatibilidade|\/100|confiança/.test(text), 'no skill lists, score or internal explanations');
-  assert.ok(!/próximas mensagens|Detalhes \d|detalhes/i.test(text), 'no promise of a second message');
-  assert.ok(!/capped at|Essential skills not fully verified|basic-v2|ai-v\d|\+p[0-9a-f]{8}/.test(text), 'no internal names or English notes');
-  assert.ok(!/Ausentes no perfil: .*Verificadas/.test(text));
-  assert.equal(text.split('Plataforma:').length - 1, 1);
-});
-
-test('nothing in the example is hard-coded: other persisted values render as they are', () => {
-  const opportunity = makeOpportunity('9', { title: 'Site institucional', budget: { currency: 'BRL', kind: 'fixed', min: 1500, max: 2500 }, summary: 'Um site simples para uma clínica. Com três páginas.' });
-  const analysis = makeAnalysis(opportunity, { price: { minBrl: 2000, maxBrl: 2000, rationale: 'x' }, effort: { minHours: 1, maxHours: 1 }, complexity: 'high', score: 91, confidence: 'medium' });
+  const analysis = makeAnalysis(opportunity, { recommendation: 'review', score: 55, effort: { minHours: 12, maxHours: 25 }, price: { minBrl: 600, maxBrl: 1250, rationale: 'Base' } }, NOW, brunoCandidate);
   const text = render(opportunity, analysis).text;
-  assert.match(text, /Preço sugerido pela IA: R\$ 2\.000\n/);
-  assert.match(text, /Orçamento do cliente: R\$ 1\.500–2\.500\n/);
-  assert.match(text, /Esforço estimado: 1 hora\n/);
-  assert.match(text, /\nUm site simples para uma clínica\.\n/, 'only the first sentence of the description');
-  assert.ok(!text.includes('Com três páginas'));
+
+  const blocks = text.split('\n\n');
+  assert.equal(blocks[0], '<b>🚨 NOVA OPORTUNIDADE</b>');
+  assert.equal(blocks[1], '<b>🟡 VALE REVISAR</b>');
+  assert.equal(blocks[2], '<b>Landing Page para o PREDPACK</b>\n🌐 99Freelas');
+  assert.equal(
+    blocks[3],
+    ['💰 Orçamento do cliente: em aberto (sem valor informado)', '💡 Preço sugerido pela IA: R$ 600–1.250', '⏱ Esforço estimado: 12–25 horas', '👥 Concorrência: 1 proposta', '🎯 Compatibilidade: média'].join('\n'),
+  );
+  assert.ok(blocks[4]!.startsWith('<b>📝 O projeto</b>\nVender o PREDPACK, uma biblioteca de cenas'));
+  assert.ok(blocks[5]!.startsWith('<b>🤖 Como a IA pode ajudar</b>\n'));
+  assert.ok(blocks[6]!.startsWith('<b>⚠️ Atenção</b>\nAcesso restrito na última consulta'));
+  assert.equal(blocks[7], '🔗 <a href="https://example.test/project/7">Abrir oportunidade</a>');
+  assert.equal(blocks.length, 8);
+  assert.ok(visibleLength(text) <= COMPACT_CEILING, `${visibleLength(text)} characters`);
+  assertBalancedTags(text);
+});
+
+test('the header says why the message exists: a real new alert, an updated analysis, or a format preview', () => {
+  const opportunity = makeOpportunity('9');
+  const analysis = makeAnalysis(opportunity);
+  const real = render(opportunity, analysis, 'enriched').text;
+  assert.ok(real.startsWith('<b>🚨 NOVA OPORTUNIDADE</b>\n\n'));
+  assert.ok(!/PRÉVIA|não é um alerta novo|ATUALIZADA/.test(real), 'a real opportunity never carries preview text');
+  const update = render(opportunity, analysis, 'update').text;
+  assert.ok(update.startsWith('<b>🔄 ANÁLISE ATUALIZADA</b>\n\n'));
+  assert.ok(!/PRÉVIA|NOVA OPORTUNIDADE/.test(update));
+  const demo = render(opportunity, analysis, 'demo').text;
+  assert.ok(demo.startsWith('<b>🧪 PRÉVIA DE FORMATO</b>\n\n'));
+  assert.ok(!/NOVA OPORTUNIDADE|ATUALIZADA/.test(demo));
+});
+
+test('the classification follows the saved recommendation', () => {
+  const open = makeOpportunity('10');
+  assert.match(render(open, makeAnalysis(open, { recommendation: 'apply' })).text, /<b>🟢 BOA OPORTUNIDADE<\/b>/);
+  assert.match(render(open, makeAnalysis(open, { recommendation: 'review' })).text, /<b>🟡 VALE REVISAR<\/b>/);
+  const wait = makeOpportunity('11', { access: { kind: 'premium_only', publicAt: '2026-05-02T12:00:00.000Z', rawLabel: 'x' } });
+  assert.match(render(wait, makeAnalysis(wait)).text, /<b>🕒 AGUARDAR LIBERAÇÃO<\/b>/);
+  assert.match(render(open, makeAnalysis(open, { recommendation: 'skip' })).text, /<b>🔴 NÃO VALE A PENA<\/b>/);
+  assert.ok(!/VALE CANDIDATAR-SE/.test(render(open, makeAnalysis(open)).text), 'the former wording is gone');
+});
+
+test('nothing is hard-coded: other persisted values render as they are', () => {
+  const opportunity = makeOpportunity('8', { title: 'Site institucional', budget: { currency: 'BRL', kind: 'fixed', min: 1500, max: 2500 }, description: 'Um site simples para uma clínica, com três páginas e um formulário.', proposalCount: 14 });
+  const analysis = makeAnalysis(opportunity, { price: { minBrl: 2000, maxBrl: 2000, rationale: 'x' }, effort: { minHours: 1, maxHours: 1 }, score: 91 });
+  const text = render(opportunity, analysis).text;
+  assert.match(text, /💰 Orçamento do cliente: R\$ 1\.500–2\.500\n/);
+  assert.match(text, /💡 Preço sugerido pela IA: R\$ 2\.000\n/);
+  assert.match(text, /⏱ Esforço estimado: 1 hora\n/);
+  assert.match(text, /👥 Concorrência: 14 propostas\n/);
+  assert.match(text, /🎯 Compatibilidade: alta/);
   assert.ok(!/PREDPACK|600|1\.250|21\/09/.test(text), 'no value from another example leaks in');
+});
+
+test('the message leaves out the proposal, question lists, internal explanations and any "next messages" promise', () => {
+  const opportunity = restricted('12');
+  const text = render(opportunity, makeAnalysis(opportunity, {}, NOW, brunoCandidate)).text;
+  assert.ok(!/Olá! Li o briefing|Rascunho|Proposta|✍️|Perguntas ao cliente|Já existe um layout/.test(text));
+  assert.ok(!/Por que essa nota|Requisitos essenciais|Verificadas:|Lacunas|\/100|confiança/.test(text));
+  assert.ok(!/próximas mensagens|detalhes nas/i.test(text));
+  assert.ok(!/capped at|Essential skills not fully verified|basic-v\d|ai-v\d|\+p[0-9a-f]{8}/.test(text), 'no internal names or English notes');
 });
 
 test('the client budget is kept apart from the AI price, and a missing value is "não informado"', () => {
@@ -97,89 +113,67 @@ test('Brasília time is formatted from the real instant, and invalid dates yield
   assert.equal(formatBrasiliaTime('not a date'), null);
 });
 
-test('the main caveat: unverified essential skills first, then the AI risk; a known alias stays unverified, not absent', () => {
-  const opportunity = makeOpportunity('10');
+test('Atenção holds only the main caveat: restricted access, then unverified skills, then the AI risk; none, no block', () => {
+  const opportunity = makeOpportunity('13');
   const fresh = makeAnalysis(opportunity, { essentialSkills: ['HTML', 'design responsivo', 'Photoshop'], matchedSkills: ['HTML'], missingSkills: [] }, NOW, brunoCandidate);
-  assert.match(render(opportunity, fresh).text, /⚠️ Competências essenciais ainda não verificadas: HTML, design responsivo\./);
+  assert.match(render(opportunity, fresh).text, /<b>⚠️ Atenção<\/b>\nCompetências essenciais ainda não verificadas: HTML, design responsivo\./);
 
   // Stored before the alias was known: listed as "not covered"; the display regroups it.
   const legacy: MatchAnalysis = { ...fresh, verification: { ...fresh.verification, unverified: ['HTML'], notCovered: ['design responsivo', 'Photoshop'] } };
-  const text = render(opportunity, legacy).text;
-  assert.match(text, /não verificadas: HTML, design responsivo\./);
-  assert.ok(!/Ausentes/.test(text), 'a known alias is not "absent"');
+  const legacyText = render(opportunity, legacy).text;
+  assert.match(legacyText, /não verificadas: HTML, design responsivo\./);
+  assert.ok(!/Ausentes/.test(legacyText), 'a known alias is not "absent"');
 
   const onlyAbsent: MatchAnalysis = { ...fresh, verification: { ...fresh.verification, unverified: [], learning: [], notCovered: ['Photoshop'] } };
-  assert.match(render(opportunity, onlyAbsent).text, /⚠️ Ausentes no perfil: Photoshop\./);
+  assert.match(render(opportunity, onlyAbsent).text, /<b>⚠️ Atenção<\/b>\nAusentes no perfil: Photoshop\./);
 
   const verified = makeAnalysis(opportunity);
-  assert.match(render(opportunity, verified).text, /⚠️ Escopo pouco detalhado/);
-  const noRisk: MatchAnalysis = { ...verified, risks: [] };
-  assert.ok(!render(opportunity, noRisk).text.includes('⚠️'), 'no caveat line when there is nothing relevant');
+  assert.match(render(opportunity, verified).text, /<b>⚠️ Atenção<\/b>\nEscopo pouco detalhado/);
+  assert.ok(!render(opportunity, { ...verified, risks: [] }).text.includes('Atenção'), 'nothing to warn about: no block');
+
+  const both = restricted('14');
+  const bothText = render(both, makeAnalysis(both, {}, NOW, brunoCandidate)).text;
+  assert.equal((bothText.match(/⚠️ Atenção/g) ?? []).length, 1, 'one caveat only');
+  assert.match(bothText, /Atenção<\/b>\nAcesso restrito/, 'restricted access comes first');
+  assert.ok(!/Competências essenciais/.test(bothText));
 });
 
-test('availability is never stated as confirmed', () => {
-  const now = NOW;
-  const past = render(restricted('11', { access: { kind: 'premium_only', publicAt: '2026-04-30T12:00:00.000Z', rawLabel: 'x' } }), makeAnalysis(restricted('11')));
-  assert.match(past.text, /a liberação estimada \(.*\) já passou\. Confirmar no site\./);
-  const unknownTime = render(restricted('12', { access: { kind: 'premium_only', publicAt: null, rawLabel: 'x' } }), makeAnalysis(restricted('12')));
-  assert.match(unknownTime.text, /horário de liberação desconhecido\. Confirmar no site\./);
-  const open = render(makeOpportunity('13'), makeAnalysis(makeOpportunity('13')));
-  assert.match(open.text, /Disponibilidade: aberta na última consulta \(.*\)\. Confirmar no site\./);
-  const unknown = render(makeOpportunity('14', { access: { kind: 'unknown', publicAt: null, rawLabel: null } }), makeAnalysis(makeOpportunity('14')));
-  assert.match(unknown.text, /Disponibilidade: não verificada\. Confirmar no site\./);
-  for (const entry of [past, unknownTime, open, unknown]) assert.ok(!/liberada|pode se candidatar|já está aberta/i.test(entry.text));
-  assert.ok(now instanceof Date);
+test('restricted access is worded as an estimate to confirm; open or unknown access adds no claim', () => {
+  const future = restricted('15');
+  assert.match(render(future, makeAnalysis(future)).text, /Acesso restrito na última consulta\. Liberação estimada: 02\/05 às 16h37 \(Brasília\); confirmar no site\./);
+  const past = restricted('16', { access: { kind: 'premium_only', publicAt: '2026-04-30T12:00:00.000Z', rawLabel: 'x' } });
+  assert.match(render(past, makeAnalysis(past)).text, /a liberação estimada \(30\/04 às 09h00\) já passou\. Confirmar no site\./);
+  const noTime = restricted('17', { access: { kind: 'premium_only', publicAt: null, rawLabel: 'x' } });
+  assert.match(render(noTime, makeAnalysis(noTime)).text, /horário de liberação desconhecido\. Confirmar no site\./);
+  for (const kind of ['public', 'unknown'] as const) {
+    const plain = makeOpportunity('18', { access: { kind, publicAt: null, rawLabel: null } });
+    const text = render(plain, makeAnalysis(plain, { risks: [] })).text;
+    assert.ok(!/liberad|aberta a todos|pode se candidatar|Acesso restrito/i.test(text), kind);
+  }
 });
 
 test('very long fields are tightened, never cut mid-tag, and never exceed the ceiling', () => {
-  const opportunity = makeOpportunity('15', { title: 'T'.repeat(300), summary: 'Descrição sem fim '.repeat(200) + '.' });
+  const opportunity = makeOpportunity('19', { title: 'T'.repeat(300), description: 'Uma descrição que não termina nunca, com várias palavras seguidas. '.repeat(60) });
   const analysis = makeAnalysis(opportunity, {}, NOW, brunoCandidate);
-  const long: MatchAnalysis = {
-    ...analysis,
-    verification: { ...analysis.verification, unverified: Array.from({ length: 12 }, (_, i) => `Habilidade ${i} ${'h'.repeat(30)}`) },
-  };
+  const long: MatchAnalysis = { ...analysis, risks: Array.from({ length: 12 }, (_, i) => `Risco ${i} ${'r'.repeat(290)}`) };
   for (const mode of ['enriched', 'update', 'demo'] as const) {
-    const message = render(opportunity, long, mode);
-    assert.ok(visibleLength(message.text) <= COMPACT_CEILING, `${mode}: ${visibleLength(message.text)} characters`);
-    assertBalancedTags(message.text);
-    assert.match(message.text, /Abrir projeto<\/a>/, 'the link survives the tightening');
+    const text = render(opportunity, long, mode).text;
+    assert.ok(visibleLength(text) <= COMPACT_CEILING, `${mode}: ${visibleLength(text)}`);
+    assertBalancedTags(text);
+    assert.match(text, /Abrir oportunidade<\/a>$/);
   }
 });
 
 test('external text is escaped everywhere, and only http(s) links are linked', () => {
-  const opportunity = makeOpportunity('16', { title: '<script>alert(1)</script> & "x"', summary: 'Texto <b>com</b> tags & aspas.', url: 'https://example.test/?a=1&b="2"' });
+  const opportunity = makeOpportunity('20', { title: '<script>alert(1)</script> & "x"', description: 'Preciso de <b>uma</b> landing page em HTML & CSS para hoje.', url: 'https://example.test/?a=1&b="2"' });
   const text = render(opportunity, makeAnalysis(opportunity)).text;
-  assert.ok(!text.includes('<script>') && !text.includes('<b>com</b>'));
+  assert.ok(!text.includes('<script>') && !text.includes('<b>uma</b>'));
   assert.match(text, /&lt;script&gt;alert\(1\)&lt;\/script&gt; &amp; &quot;x&quot;/);
-  assert.match(text, /Texto &lt;b&gt;com&lt;\/b&gt; tags &amp; aspas\./);
+  assert.match(text, /&lt;b&gt;uma&lt;\/b&gt; landing page em HTML &amp; CSS/);
   assert.match(text, /href="https:\/\/example\.test\/\?a=1&amp;b=%22 ?2%22"|href="https:\/\/example\.test\/\?a=1&amp;b=%222%22"/);
   assertBalancedTags(text);
-  const unsafe = render(makeOpportunity('17', { url: 'javascript:alert(1)' }), makeAnalysis(makeOpportunity('17')));
-  assert.ok(!unsafe.text.includes('href='));
-  assert.ok(!/🔗/.test(unsafe.text));
-});
-
-test('emoji and accents in the title survive, and there are only a few emojis', () => {
-  const opportunity = makeOpportunity('18', { title: 'Site bonito 🚀 com ação' });
-  const text = render(opportunity, makeAnalysis(opportunity, {}, NOW, brunoCandidate)).text;
-  assert.ok(text.includes('Site bonito 🚀 com ação'));
-  const emojis = text.match(/\p{Extended_Pictographic}/gu) ?? [];
-  assert.ok(emojis.length <= 5, `${emojis.length} emojis`);
-});
-
-test('an update is labeled briefly, and the demo is clearly a preview', () => {
-  const opportunity = makeOpportunity('19');
-  const analysis = makeAnalysis(opportunity);
-  assert.match(render(opportunity, analysis, 'update').text, /VALE CANDIDATAR-SE<\/b> · análise atualizada/);
-  assert.match(render(opportunity, analysis, 'demo').text, /^🧪 <b>PRÉVIA<\/b> · formato compacto, não é um alerta novo\n\n<b>🟢 VALE CANDIDATAR-SE<\/b>/);
-  assert.ok(!render(opportunity, analysis, 'enriched').text.includes('PRÉVIA'));
-});
-
-test('the other recommendation headings render', () => {
-  const opportunity = makeOpportunity('20', { access: { kind: 'premium_only', publicAt: '2026-05-02T12:00:00.000Z', rawLabel: 'x' } });
-  assert.match(render(opportunity, makeAnalysis(opportunity)).text, /🕒 AGUARDAR LIBERAÇÃO/);
-  const open = makeOpportunity('21');
-  assert.match(render(open, makeAnalysis(open, { recommendation: 'skip' })).text, /🔴 NÃO VALE A PENA/);
+  const unsafe = makeOpportunity('21', { url: 'javascript:alert(1)' });
+  assert.ok(!render(unsafe, makeAnalysis(unsafe)).text.includes('href='));
 });
 
 test('deterministic reasons of the basic filter are translated; unknown text is kept', () => {
@@ -190,12 +184,14 @@ test('deterministic reasons of the basic filter are translated; unknown text is 
   assert.equal(translateReason('something unexpected'), 'something unexpected');
 });
 
-test('the basic message is pt-BR, escaped and short', () => {
+test('the basic message of a 99Freelas project is pt-BR, escaped, in the shared layout and short', () => {
   const opportunity = makeOpportunity('24', { title: 'Site <b>&</b>' });
-  const message = formatOpportunityMessage(opportunity, makeFilter('review'), { sourceLabels: { fake: '99Freelas' } });
-  assert.match(message, /<b>🟡 PARA REVISAR<\/b>/);
-  assert.match(message, /Site &lt;b&gt;&amp;&lt;\/b&gt;/);
-  assert.match(message, /Orçamento do cliente: em aberto \(sem valor informado\)/);
-  assert.match(message, /Propostas: 1 · Interessados: 2/);
+  const message = formatOpportunityMessage(opportunity, makeFilter('review'), { sourceLabels: { fake: '99Freelas' }, now: NOW });
+  assert.ok(message.startsWith('<b>🚨 NOVA OPORTUNIDADE</b>\n\n<b>🟡 VALE REVISAR</b>\n\n<b>Site &lt;b&gt;&amp;&lt;/b&gt;</b>\n🌐 99Freelas'));
+  assert.match(message, /💰 Orçamento: em aberto \(sem valor informado\)/);
+  assert.match(message, /👥 Concorrência: 1 proposta/);
+  assert.match(message, /🧩 Habilidades: HTML/);
+  assert.ok(!/⏱|💡|Preço sugerido|Esforço/.test(message), 'no effort or suggested price without a saved analysis');
+  assert.ok(visibleLength(message) <= COMPACT_CEILING);
   assertBalancedTags(message);
 });

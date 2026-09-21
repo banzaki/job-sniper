@@ -161,10 +161,10 @@ test('the score is described as a technical-fit rating, never as a probability',
 test('messages state that unverified competence needs review before applying', () => {
   const opportunity = makeOpportunity('1');
   const unverified = renderAnalysisMessage({ opportunity, analysis: makeAnalysis(opportunity, {}, NOW, brunoCandidate), mode: 'enriched', now: NOW });
-  assert.match(unverified.text, /^<b>🟡 VALE REVISAR<\/b>/);
+  assert.match(unverified.text, /<b>🟡 VALE REVISAR<\/b>/);
   assert.match(unverified.text, /Competências essenciais ainda não verificadas: HTML, CSS, landing pages/);
   const verified = renderAnalysisMessage({ opportunity, analysis: makeAnalysis(opportunity), mode: 'enriched', now: NOW });
-  assert.match(verified.text, /^<b>🟢 VALE CANDIDATAR-SE<\/b>/);
+  assert.match(verified.text, /<b>🟢 BOA OPORTUNIDADE<\/b>/);
   assert.match(verified.text, /Escopo pouco detalhado/);
   assert.ok(!/não verificadas/.test(verified.text), 'a fully verified analysis shows no competence caveat');
 });
@@ -278,20 +278,20 @@ test('unknown access reads "verify availability" and never claims applying is po
   assert.equal(actionability.status, 'unknown');
   assert.match(actionability.reason, /verify availability/i);
   const summary = renderAnalysisMessage({ opportunity: unknown, analysis: makeAnalysis(unknown), mode: 'enriched', now: NOW }).text;
-  assert.match(summary, /Disponibilidade: não verificada\. Confirmar no site\./);
+  assert.ok(!/Acesso restrito|Disponibilidade/.test(summary), 'no availability claim is made for unknown access');
   assert.ok(!/pode se candidatar|aberta a todos/i.test(summary));
 });
 
 test('in a rendered message a passed estimate says the time passed and availability was not re-checked', () => {
   const opportunity = restrictedAt('2026-05-01T10:00:00.000Z');
   const summary = renderAnalysisMessage({ opportunity, analysis: makeAnalysis(opportunity), mode: 'enriched', now: NOW }).text;
-  const line = summary.split('\n').find((entry) => entry.startsWith('Disponibilidade')) ?? '';
+  const line = summary.split('\n').find((entry) => entry.startsWith('Acesso restrito')) ?? '';
   assert.match(line, /a liberação estimada \(01\/05 às 07h00\) já passou\. Confirmar no site\./);
   assert.ok(!/aberta a todos/i.test(line));
 });
 
-test('even a public observation is worded as "at the last check", with a reminder to confirm', () => {
+test('an open opportunity makes no availability claim at all in the message', () => {
   const opportunity = makeOpportunity('5');
   const summary = renderAnalysisMessage({ opportunity, analysis: makeAnalysis(opportunity), mode: 'enriched', now: NOW }).text;
-  assert.match(summary, /Disponibilidade: aberta na última consulta \(01\/05 às 09h00\)\. Confirmar no site\./);
+  assert.ok(!/Disponibilidade|aberta na última consulta|Acesso restrito/.test(summary));
 });

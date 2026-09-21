@@ -1,6 +1,6 @@
 # STATUS
 
-Last updated: 2026-09-21 (SPEC 007.1 ranking and alert limit implemented and accepted live; SPEC 007 is 22b855a, SPEC 006 is cbd1516, SPEC 005 is 58f8831. Workana is suspended by its terms of use)
+Last updated: 2026-09-21 (SPEC 007.2 Telegram visual layout implemented and accepted; SPEC 007.1 is d63cda8, SPEC 007 is 22b855a, SPEC 006 is cbd1516. Workana is suspended by its terms of use)
 
 ## RECON — Workana and Contra (2026-09-20, read-only; no adapter written, no Gemini, no Telegram)
 
@@ -50,6 +50,33 @@ handle in that SPEC: currency (USD bands) in the budget model and message; the l
 listing dates; featured items breaking the newest-first order; reading Workana's terms before enabling a live run.
 Rough effort: Workana about one SPEC of the size of the 99Freelas adapter (client, parser, source, fixtures and about 40 offline
 tests, plus the small currency and budget-carry changes). Contra: at least two to three times that, dominated by unknowns.
+
+## SPEC 007.2 — Telegram visual layout (implemented and accepted)
+
+Presentation only: ranking, filters, the per-run limit, the database, the sources and deduplication are untouched.
+- **Layout (`src/notify/layout.ts`, shared by the basic alerts, Remotive and the AI-analysis messages):** header, classification, title and source
+  with recency, facts, `📝 O projeto`, `🤖 Como a IA pode ajudar`, `⚠️ Atenção`, link; blocks separated by blank lines; under 1,000 visible
+  characters (fields are tightened in steps, the optional AI-help block is dropped last); HTML-escaped; only safe links.
+- **Headers:** `🚨 NOVA OPORTUNIDADE` (real), `🧪 PRÉVIA DE FORMATO` (manual preview only), `🔄 ANÁLISE ATUALIZADA`. A real opportunity never carries preview
+  wording (tested). **Classification:** `🟢 BOA OPORTUNIDADE` (shortlist / AI apply), `🟡 VALE REVISAR` (review); the former "VALE CANDIDATAR-SE" is gone.
+- **Facts:** budget in the original currency, competition ("N propostas"), fixed/hourly, at most four relevant skills (the filter's strong signals
+  only), compatibility in words from the deterministic filter (alta/média/baixa). **Effort and the AI's suggested price only when a saved analysis exists.**
+- **Summary (addendum):** `substantiveSummary` skips greetings (Hello, Hi there, Olá, Bom dia, Dear freelancer), labels and numbering (Descrição,
+  Project description, Objective), lines under about 30 characters, generic headings and pleasantries; at most two short sentences in the author's
+  own words; nothing useful means the block is omitted. Two real bugs were caught by its tests ("Dear Freelancer I need..." lost its first word; a bare
+  "Objetivo" label was not removed) and fixed.
+- **AI help (`src/notify/ai-help.ts`):** fixed sentences by rules over the title and description only (WordPress, named front-end technologies,
+  automation/bots, API/integration, bug fixes, an explicit request to build a site); never claims mastery; omitted when unsafe (skipped project,
+  advanced scope, skills only in tags) or without a clear signal. No AI is called.
+- **Atenção:** one caveat by priority: restricted access, language, advanced scope, high competition (61+ proposals), then the most relevant
+  stored reason. `SOURCE_NOTES`/"Fonte com atraso" no longer exist.
+- **Validation:** 452 tests pass (new: summary rules, AI help, headers, blank lines, attention priority, escape); typecheck and build pass. Rendered
+  samples of Freelancer.com, 99Freelas (basic and with a saved analysis: new, update, preview) and Remotive from a copy of the real database.
+  ONE real preview sent (`freelancer:40724700`, label `visual`, 588 visible characters, with `message_id`); the repeat sent 0; production flags
+  unchanged (99Freelas 7 notified, Freelancer.com 5, Remotive 0, analyses 1). No Gemini.
+
+Limits: the two-sentence summary is the author's text as written (it can be in English or German for Freelancer.com); "Compatibilidade" is the
+current filter, not an AI score; a real alert of a project that is listed before it was scored by AI carries no effort or price by design.
 
 ## SPEC 007.1 — Ranking and alert limit (hotfix; implemented and accepted live)
 

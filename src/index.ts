@@ -8,7 +8,7 @@ import { FILTER_RULE_VERSION } from './filter/opportunity-filter.js';
 import { createNotifier } from './notify/create-notifier.js';
 import { printNotifyReport } from './notify/format-report.js';
 import { notifyPending } from './notify/notify-pending.js';
-import { SOURCE_LABELS, SOURCE_NOTES } from './notify/source-labels.js';
+import { SOURCE_LABELS } from './notify/source-labels.js';
 import { SOURCE_DATA_MAX_AGE_HOURS } from './sources/create-sources.js';
 import { collectSources } from './pipeline/collect-sources.js';
 import { reevaluateOutdated } from './pipeline/reevaluate.js';
@@ -87,7 +87,7 @@ async function main(): Promise<number> {
         dryRun: config.dryRun,
         analysisVersion: ANALYSIS_VERSION,
         candidate: brunoCandidate,
-        format: { sourceLabels: SOURCE_LABELS, sourceNotes: SOURCE_NOTES },
+        format: { sourceLabels: SOURCE_LABELS },
         maxAgeHoursBySource: SOURCE_DATA_MAX_AGE_HOURS,
         maxAlerts: config.maxTelegramAlertsPerRun,
       });

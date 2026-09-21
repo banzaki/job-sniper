@@ -2,12 +2,18 @@ import { standingOf } from '../ai/analysis-output.js';
 import type { MatchAnalysis, Recommendation, SkillVerification } from '../domain/match-analysis.js';
 import type { Opportunity, OpportunityBudget } from '../domain/opportunity.js';
 import type { CandidateProfile } from '../profile/candidate-profile.js';
-import { escapeHtml, excerpt, safeHttpUrl, visibleLength } from './html.js';
+import { aiHelpFor } from './ai-help.js';
+import { restrictedAccessText } from './blocks.js';
+import { excerpt } from './html.js';
+import { competitionText, fitAlert, recencyLine, substantiveSummary, type AlertKind, type AlertParts, type Tier } from './layout.js';
+
+export { COMPACT_CEILING, formatBrasiliaTime } from './layout.js';
 
 /**
- * Portuguese Telegram presentation of a saved analysis: ONE compact message per opportunity. It is built only
- * from what is persisted; nothing here calls an AI or adds claims. The full analysis and the proposal draft stay
- * in the database and are read with `npm run analyses`; they are never sent automatically.
+ * Portuguese Telegram presentation of a saved analysis: ONE compact message per opportunity, in the shared visual layout.
+ * It is built only from what is persisted; nothing here calls an AI or adds claims. The full analysis and the proposal
+ * draft stay in the database and are read with `npm run analyses`; they are never sent automatically. The effort estimate
+ * and the suggested price appear only here, because only here a saved analysis exists.
  */
 export type PresentMode = 'enriched' | 'update' | 'demo';
 
@@ -27,23 +33,13 @@ export interface RenderedPart {
   silent: boolean;
 }
 
-const HEADINGS: Record<Recommendation, string> = {
-  apply: '🟢 VALE CANDIDATAR-SE',
+const CLASSIFICATION: Record<Recommendation, string> = {
+  apply: '🟢 BOA OPORTUNIDADE',
   review: '🟡 VALE REVISAR',
   wait: '🕒 AGUARDAR LIBERAÇÃO',
   skip: '🔴 NÃO VALE A PENA',
 };
-
-/** The message aims at 600–900 visible characters and never exceeds the ceiling. */
-export const COMPACT_CEILING = 1000;
-
-/** Progressively tighter limits for the long free-text fields, used only when the message would not fit. */
-const TIERS = [
-  { title: 100, sentence: 200, caveat: 220, skills: 3, checkedAt: true },
-  { title: 80, sentence: 140, caveat: 150, skills: 2, checkedAt: false },
-  { title: 60, sentence: 100, caveat: 100, skills: 1, checkedAt: false },
-] as const;
-type Tier = (typeof TIERS)[number];
+const KIND: Record<PresentMode, AlertKind> = { enriched: 'new', update: 'update', demo: 'preview' };
 
 const number = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 });
 
@@ -54,22 +50,6 @@ export function formatBrl(min: number, max: number): string {
 export function formatHours(min: number, max: number): string {
   const unit = max === 1 ? 'hora' : 'horas';
   return min === max ? `${max} ${unit}` : `${min}–${max} ${unit}`;
-}
-
-/** "21/09 às 16h37" in Brasília time; null for anything that is not a valid date. */
-export function formatBrasiliaTime(iso: string): string | null {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return null;
-  const parts = new Intl.DateTimeFormat('pt-BR', {
-    timeZone: 'America/Sao_Paulo',
-    day: '2-digit',
-    month: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(date);
-  const part = (type: string): string => parts.find((entry) => entry.type === type)?.value ?? '';
-  return `${part('day')}/${part('month')} às ${part('hour')}h${part('minute')}`;
 }
 
 const money = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 2 });
@@ -94,25 +74,6 @@ export function describeClientBudget(budget: OpportunityBudget | null): string {
   if (budget.min === null && budget.max === null) return budget.kind === 'open' ? 'em aberto (sem valor informado)' : 'não informado';
   const range = formatMoney(budget.currency || 'BRL', budget.min, budget.max);
   return budget.kind === 'hourly' ? `${range} por hora` : range;
-}
-
-/** Availability as of the last check. A release time is only ever "estimated"; nothing is stated as confirmed. */
-function availability(opportunity: Opportunity, now: Date, tier: Tier): string {
-  const checked = String(opportunity.sourceMetadata.accessCheckedAt ?? opportunity.fetchedAt);
-  const checkedAt = formatBrasiliaTime(checked);
-  const when = tier.checkedAt && checkedAt ? ` (${checkedAt})` : '';
-  const { access } = opportunity;
-
-  if (access.kind === 'public') return `aberta na última consulta${when}. Confirmar no site.`;
-  if (access.kind === 'unknown') return 'não verificada. Confirmar no site.';
-
-  const opens = access.publicAt ? formatBrasiliaTime(access.publicAt) : null;
-  if (access.publicAt && opens && Date.parse(access.publicAt) <= now.getTime()) {
-    return `restrita na última consulta${when}; a liberação estimada (${opens}) já passou. Confirmar no site.`;
-  }
-  return opens
-    ? `restrita na última consulta${when}. Liberação estimada: ${opens} (Brasília); confirmar no site.`
-    : `restrita na última consulta${when}; horário de liberação desconhecido. Confirmar no site.`;
 }
 
 interface VerificationView {
@@ -162,67 +123,58 @@ function skillList(skills: readonly string[], max: number): string {
   return more > 0 ? `${shown} e mais ${more}` : shown;
 }
 
-/** The single most relevant caveat: missing verification of the essential skills first, else the AI's first risk. */
-function mainCaveat(view: VerificationView, risks: readonly string[], tier: Tier): string | null {
+/**
+ * The single main caveat, in this order: restricted access (an estimate to confirm), essential skills not verified,
+ * then the AI's first own risk.
+ */
+function mainCaveat(view: VerificationView, risks: readonly string[], access: string | null): string | null {
+  if (access) return access;
   if (!view.verified) {
     const notVerified = [...view.unverified, ...view.learning];
-    if (notVerified.length > 0) {
-      return excerpt(`Competências essenciais ainda não verificadas: ${skillList(notVerified, tier.skills)}.`, tier.caveat).text;
-    }
-    if (view.absent.length > 0) return excerpt(`Ausentes no perfil: ${skillList(view.absent, tier.skills)}.`, tier.caveat).text;
+    if (notVerified.length > 0) return `Competências essenciais ainda não verificadas: ${skillList(notVerified, 3)}.`;
+    if (view.absent.length > 0) return `Ausentes no perfil: ${skillList(view.absent, 3)}.`;
     return 'A análise não listou as competências essenciais.';
   }
-  return risks[0] ? excerpt(risks[0], tier.caveat).text : null;
+  return risks[0] ?? null;
 }
 
-/** Leading list numbers and heading words ("1. Objetivo") are noise in a one-sentence description. */
-export function firstSentence(text: string, max: number): string {
-  const flat = text
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/^\d+[.)]\s*/, '')
-    .replace(/^(objetivo|descrição|descricao|sobre o projeto|briefing)\s*[:–-]?\s+(?=\p{Lu})/iu, '');
-  const first = /^(.+?[.!?])(?:\s|$)/u.exec(flat)?.[1] ?? flat;
-  return excerpt(first, max).text;
-}
-
-function compactText(input: PresentInput, view: VerificationView, risks: readonly string[], tier: Tier): string {
-  const { opportunity, analysis } = input;
-  const source = input.sourceLabels?.[opportunity.sourceId] ?? opportunity.sourceId;
-  const link = safeHttpUrl(opportunity.url);
-  const work = firstSentence(opportunity.summary ?? opportunity.description, tier.sentence);
-  const caveat = mainCaveat(view, risks, tier);
-
-  const lines: string[] = [];
-  if (input.mode === 'demo') lines.push('🧪 <b>PRÉVIA</b> · formato compacto, não é um alerta novo', '');
-  lines.push(
-    `<b>${HEADINGS[analysis.recommendation]}</b>${input.mode === 'update' ? ' · análise atualizada' : ''}`,
-    `<b>${escapeHtml(excerpt(opportunity.title, tier.title).text)}</b>`,
-    `Plataforma: ${escapeHtml(source)}`,
-  );
-  if (work) lines.push('', escapeHtml(work));
-  lines.push(
-    '',
-    `Preço sugerido pela IA: ${escapeHtml(formatBrl(analysis.price.min, analysis.price.max))}`,
-    `Orçamento do cliente: ${escapeHtml(describeClientBudget(opportunity.budget))}`,
-    `Esforço estimado: ${escapeHtml(formatHours(analysis.effort.minHours, analysis.effort.maxHours))}`,
-  );
-  if (caveat) lines.push('', `⚠️ ${escapeHtml(caveat)}`);
-  lines.push('', `Disponibilidade: ${escapeHtml(availability(opportunity, input.now, tier))}`);
-  if (link) lines.push('', `🔗 <a href="${escapeHtml(link)}">Abrir projeto</a>`);
-  return lines.join('\n');
-}
+const fitLabel = (score: number): string => (score >= 75 ? 'alta' : score >= 50 ? 'média' : 'baixa');
 
 /**
- * Renders the ONE message of an analysis. The free-text fields are tightened tier by tier until the message
- * fits the ceiling; if even the tightest tier does not, it is an error (never a truncated tag or link).
+ * Renders the ONE message of an analysis. Free-text fields are tightened tier by tier until the message fits the
+ * ceiling; if even the tightest tier does not, it is an error (never a truncated tag or link).
  */
 export function renderAnalysisMessage(input: PresentInput): RenderedPart {
-  const view = verificationView(input.analysis.verification, input.candidate);
-  const risks = ownRisks(input.analysis);
-  for (const tier of TIERS) {
-    const text = compactText(input, view, risks, tier);
-    if (visibleLength(text) <= COMPACT_CEILING) return { label: 'Mensagem', text, silent: false };
-  }
-  throw new Error(`Message exceeds ${COMPACT_CEILING} characters even in its shortest form.`);
+  const { opportunity, analysis } = input;
+  const view = verificationView(analysis.verification, input.candidate);
+  const attention = mainCaveat(view, ownRisks(analysis), restrictedAccessText(opportunity, input.now));
+  const summary = substantiveSummary((opportunity.description || opportunity.summary || '').slice(0, 4000), 260);
+  const aiHelp = aiHelpFor(opportunity, analysis.recommendation !== 'skip');
+  const source = input.sourceLabels?.[opportunity.sourceId] ?? opportunity.sourceId;
+  const competition = competitionText(opportunity.proposalCount);
+
+  const facts = [
+    { label: '💰 Orçamento do cliente:', value: describeClientBudget(opportunity.budget) },
+    { label: '💡 Preço sugerido pela IA:', value: formatBrl(analysis.price.min, analysis.price.max) },
+    { label: '⏱ Esforço estimado:', value: formatHours(analysis.effort.minHours, analysis.effort.maxHours) },
+    ...(competition ? [{ label: '👥 Concorrência:', value: competition }] : []),
+    { label: '🎯 Compatibilidade:', value: fitLabel(analysis.score) },
+  ];
+
+  const text = fitAlert(
+    (tier: Tier): AlertParts => ({
+      kind: KIND[input.mode],
+      classification: CLASSIFICATION[analysis.recommendation],
+      title: excerpt(opportunity.title, tier.title).text,
+      source,
+      recency: recencyLine(opportunity, input.now),
+      facts,
+      project: summary === null ? null : excerpt(summary, tier.project).text,
+      aiHelp: tier.aiHelp ? aiHelp : null,
+      attention: attention === null ? null : excerpt(attention, tier.attention).text,
+      link: opportunity.url,
+      linkLabel: 'Abrir oportunidade',
+    }),
+  );
+  return { label: 'Mensagem', text, silent: false };
 }
