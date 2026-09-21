@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { loadConfig } from '../config.js';
 import type { FilterResult } from '../domain/filter-result.js';
 import type { Opportunity } from '../domain/opportunity.js';
-import { compareForAlert, competitionTier, publicationDay, strongSignalCount } from '../filter/ranking.js';
+import { budgetRank, compareForAlert, competitionTier, publicationDay, strongSignalCount } from '../filter/ranking.js';
 import { evaluateOpportunity } from '../filter/opportunity-filter.js';
 import { donBrunoProfile } from '../profile/don-bruno.js';
 import { OpportunityStore } from '../storage/opportunity-store.js';
@@ -115,14 +115,16 @@ const project = (over: Partial<Opportunity> = {}): Opportunity =>
   });
 const decide = (opportunity: Opportunity) => evaluateOpportunity(opportunity, donBrunoProfile, NOW);
 
-test('a freelance project with more than 150 proposals is stored but never alerted; up to 150 stays a review', () => {
+test('competition never removes a relevant project: more than 60 proposals is a review, more than 150 a review with the lowest priority', () => {
   assert.equal(decide(project({ proposalCount: 60 })).decision, 'shortlist');
   assert.equal(decide(project({ proposalCount: 150 })).decision, 'review', '61 to 150 is crowded: at most a review');
-  const crowded = decide(project({ proposalCount: 151 }));
-  assert.equal(crowded.decision, 'skip');
-  assert.equal(crowded.reasons[0], 'too many proposals (151) for an automatic alert');
-  assert.equal(decide(project({ proposalCount: 400 })).decision, 'skip');
+  for (const proposals of [151, 400]) {
+    const crowded = decide(project({ proposalCount: proposals }));
+    assert.equal(crowded.decision, 'review', 'still relevant, not a skip');
+    assert.ok(crowded.reasons.includes(`very crowded project (${proposals} proposals): at most a review, lowest priority`));
+  }
   assert.equal(decide(project({ proposalCount: null })).decision, 'shortlist', 'unknown is not crowded');
+  assert.equal(decide(project({ proposalCount: 400, title: 'x', description: 'no skills at all' })).decision, 'skip', 'an irrelevant project is still a skip');
 });
 
 test('a project in a language outside the profile is at most a review; pt, en and unknown are fine', () => {
@@ -233,12 +235,38 @@ test('stale data does not use a slot, and a failed send does', async () => {
   assert.equal(flaky.listPendingNotification(['shortlist', 'review']).length, 2, 'the failed one and the held one are still owed');
 });
 
-test('a Freelancer project with too many proposals is never among the alerts, and stays stored', () => {
+test('a very crowded Freelancer project stays available as a review, but is owed after everything else', () => {
   const store = new OpportunityStore(':memory:');
   const crowded = project({ externalId: '11', proposalCount: 300 });
+  const normal = project({ externalId: '12', proposalCount: 40, publishedAt: '2026-04-01T09:00:00.000Z' });
   store.insert(crowded, decide(crowded), NOW.toISOString());
-  assert.equal(store.count(), 1);
-  assert.deepEqual(store.listPendingNotification(['shortlist', 'review']), []);
+  store.insert(normal, decide(normal), NOW.toISOString());
+  assert.equal(store.count(), 2);
+  const owed = store.listPendingNotification(['shortlist', 'review']);
+  assert.equal(owed.length, 2, 'it is not dropped');
+  const ranked = owed.map((key) => store.get(key)!).sort(compareForAlert).map((entry) => entry.opportunity.externalId);
+  assert.deepEqual(ranked, ['12', '11'], 'even though it is newer, it goes last');
+});
+
+test('review ranking: a better budget first, then less competition; a very crowded review last; shortlist always first', () => {
+  const reviewWith = (id: string, reason: string | null, over: Partial<Spec> = {}) => {
+    const entry = make({ id, sourceId: 'freelancer', decision: 'review', ...over });
+    if (reason) entry.filter.reasons.push(reason);
+    return entry;
+  };
+  const reaches = reviewWith('reaches', null, { proposals: 55 });
+  const crosses = reviewWith('crosses', 'fixed budget range of about US$30 to 250 crosses the US$50 floor: at most a review', { proposals: 10 });
+  const noRate = reviewWith('no-rate', 'budget currency "INR" has no reliable USD conversion', { proposals: 10 });
+  const low = reviewWith('low', 'fixed budget of about US$40 is below the US$50 floor for a shortlist', { proposals: 10 });
+  const swamped = reviewWith('swamped', null, { proposals: 400 });
+  const green = make({ id: 'green', sourceId: 'freelancer', decision: 'shortlist', proposals: 100 });
+  assert.deepEqual(
+    [low, swamped, noRate, crosses, reaches, green].sort(compareForAlert).map((entry) => entry.opportunity.externalId),
+    ['green', 'reaches', 'crosses', 'no-rate', 'low', 'swamped'],
+  );
+  assert.deepEqual([0, 20, 21, 60, 61, 150, 151, 400].map((n) => competitionTier(make({ id: 'x', sourceId: 'freelancer', proposals: n }).opportunity)), [0, 0, 1, 1, 2, 2, 3, 3]);
+  assert.equal(budgetRank(low.filter), 3);
+  assert.equal(budgetRank(green.filter), 0);
 });
 
 // ---------- configuration ----------

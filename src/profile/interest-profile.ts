@@ -33,6 +33,11 @@ export interface InterestProfile {
   deliverableSignals?: readonly KeywordRule[];
   /** Words that name a main task that is not technology (payroll, story writing, trading...), whatever skills are tagged. */
   offTopicTasks?: readonly KeywordRule[];
-  /** Budgets below these USD equivalents are not worth an alert: a fixed price, and an hourly rate. Omit to accept any. */
+  /**
+   * USD equivalents a budget must reach for a SHORTLIST: a fixed price, and an hourly rate. A lower budget never removes an
+   * opportunity, it only limits it to a review and lowers its priority. Omit to judge no budget.
+   */
   budgetFloors?: { fixedUsd: number; hourlyUsd: number };
+  /** Payments and checkout work: a transactional scope is riskier for a small project, so it is at most a review. */
+  transactionalScope?: readonly KeywordRule[];
 }

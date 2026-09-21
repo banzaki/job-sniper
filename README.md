@@ -269,15 +269,16 @@ saved opportunity (its saved analysis if it has one, otherwise its basic message
 never marks the real notification, and repeating it with the same label sends nothing new. With `DRY_RUN=true` it only prints and writes nothing.
 
 **Ranking and limit.** Everything is stored, but a run sends at most `MAX_TELEGRAM_ALERTS_PER_RUN` (5) Telegram alerts **in total, across all
-sources**. Owed alerts are ranked first: (1) shortlist before review; (2) crowding tier of a project marketplace: up to 20 proposals is
-high priority, 21-60 normal, 61-150 reduced (a source without proposal counts is normal); (3) the most recent publication day (Brasília
-calendar day; unknown last); (4) more strong skills; (5) fewer proposals; (6) the stable id, so the order never depends on insertion
-order. What does not fit stays **pending and unmarked** and is sent by a later run; data older than the source allows is withheld first
-and does not use a slot. A freelance project with **more than 150 proposals** is stored but never alerted automatically, **61 to 150 is at most a review** (never a green
-"boa oportunidade"), and a project in a language outside the profile languages (`pt`, `en`) is at most a review. The 99Freelas decisions are not
-touched by these rules.
+sources**. Owed alerts are ranked first: (1) shortlist before review; (2) a very crowded project (more than 150 proposals) after everything else
+of the same decision; (3) the better budget (reaches the floor, crosses it, no reliable conversion, below it); (4) crowding tier of a project
+marketplace: up to 20 proposals is high priority, 21-60 normal, 61-150 reduced (a source without proposal counts is normal); (5) the most recent
+publication day (Brasília calendar day; unknown last); (6) more strong skills; (7) fewer proposals; (8) the stable id, so the order never depends on
+insertion order. What does not fit stays **pending and unmarked** and is sent by a later run; data older than the source allows is withheld first
+and does not use a slot. The cap is never lifted to make room. Competition, budget, deadline and scope **never remove** a technically relevant project:
+they limit it to `review` and lower its priority (see the filter below). A project in a language outside the profile languages (`pt`, `en`) is at most
+a review. The 99Freelas decisions are not touched by these rules.
 
-## Filter (`basic-v6`)
+## Filter (`basic-v7`)
 
 Deterministic, no AI. Every decision carries concrete reasons, the matched terms and the rule
 version. Signals are searched in title, description and skills:
@@ -307,7 +308,9 @@ when the text mentions a skill word; a freelance job that reads like a continuin
 Freelancer.com projects are freelance by nature and have no location requirement, so only the type, category, team-role, seniority and
 tag rules apply to them. Projects from 99Freelas have no such fields and are evaluated exactly as before.
 
-**Freelance projects (`basic-v6`, quality rules).** Only for sources with an engagement type (Freelancer.com, Remotive), and only lowering:
+**Freelance projects (`basic-v7`, quality rules).** Only for sources with an engagement type (Freelancer.com, Remotive), and only lowering.
+`skip` means irrelevant, closed, not technology, forbidden or really incompatible; **a low budget, a lot of competition, a short deadline and a
+risky scope never skip a technically relevant project**, they cap it at `review` and lower its priority:
 
 - **Main task.** Tags and passing mentions are not enough: the title and the **start of the description** (first 500 characters) must show a
   technical deliverable (site, landing page, WordPress, API, integration, bot, automation, bug fix...). A non-technical main task (payroll,
@@ -316,10 +319,14 @@ tag rules apply to them. Projects from 99Freelas have no such fields and are eva
   (`deliverableSignals`, `offTopicTasks`).
 - **Budget.** The original budget and currency are kept as the source states them. The filter compares the range as an **internal USD equivalent** (using the `exchange_rate`
   the official Freelancer.com API publishes for the currency, saved in `sourceMetadata.exchangeRateToUsd`) with the floors **US$50** (fixed)
-  and **US$8/h** (hourly), defaults in `budgetFloors` of the profile: a **top under the floor is skipped**; a **bottom that reaches it passes**;
-  a range that **crosses** it (bottom under, top at or over; for example US$7.80 to 13/h) is at most `review`. A missing bound is treated as
-  open. A currency with no reliable rate is at most `review`; nothing is estimated. The conversion is not shown in Telegram.
-- **Competition.** Up to 60 proposals may be shortlisted, **61 to 150 are at most `review`**, more than 150 are skipped.
+  and **US$8/h** (hourly), defaults in `budgetFloors` of the profile. These are floors **for a shortlist**, not for eligibility: a range whose **bottom
+  reaches the floor** may be a shortlist; a range that **crosses** it (for example US$7.80 to 13/h) and a range **under** it are at most `review`
+  (a low budget is the main worry of the message: "Orçamento baixo para o escopo; avalie se compensa pelo portfólio, avaliação ou experiência."). A
+  missing bound is treated as open. A currency with no reliable rate is at most `review`; nothing is estimated. The conversion is not shown in Telegram.
+- **Competition.** Up to 60 proposals may be shortlisted; more than 60 is at most `review`; more than 150 is still a `review`, with the lowest priority
+  (sent after every other review), never a skip by itself.
+- **Deadline and scope.** A very short deadline (24 hours or less, written in the text) or a transactional scope (payments, checkout: Stripe, PayPal,
+  payment gateways...) is at most `review` (`transactionalScope` in the profile). Advanced scope was already a review.
 
 Telegram's "Como a IA pode ajudar" is chosen in this order: bug or error, then API or integration, then WordPress, then front-end, then
 automation.

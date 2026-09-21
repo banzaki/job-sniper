@@ -12,10 +12,13 @@ import { findTerms } from './keyword-match.js';
  * basic-v5: a freelance project with more than 150 proposals is skipped and one in a language outside the profile is at
  * most a review; results for 99Freelas are unchanged.
  * basic-v6: for freelance projects, the main task must be technical (a non-technical main task is skipped, an unclear
- * one is at most a review), a budget range whose top is under the USD floor is skipped, a range that crosses it, a budget with no reliable USD conversion and a
- * project with 61 to 150 proposals are at most a review; results for 99Freelas are unchanged.
+ * one is at most a review), a budget range that crosses the USD floor and a project with 61 to 150 proposals are at
+ * most a review; results for 99Freelas are unchanged.
+ * basic-v7: a low budget, a lot of competition (even above 150 proposals), a very short deadline and a transactional
+ * scope no longer skip a technically relevant project: they limit it to a review (the floors are floors for a
+ * shortlist, not for eligibility). `skip` is kept for what is irrelevant, closed, not technology or incompatible.
  */
-export const FILTER_RULE_VERSION = 'basic-v6';
+export const FILTER_RULE_VERSION = 'basic-v7';
 
 interface CategoryInfo {
   direct: string | null;

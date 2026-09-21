@@ -143,6 +143,10 @@ export const donBrunoProfile: InterestProfile = {
     { term: 'video editing', aliases: ['video editor', 'photo editing', 'photography', 'photographer', 'logo design', 'graphic design', 'illustration', 'illustrator', 'music production', 'interior design', 'edicao de video'] },
   ],
 
-  // USD equivalents. Configurable defaults: below these the project is not worth an alert.
+  // USD equivalents. Configurable defaults: floors for a SHORTLIST, not for eligibility (a lower budget is a review).
   budgetFloors: { fixedUsd: 50, hourlyUsd: 8 },
+
+  transactionalScope: [
+    { term: 'payment gateway', aliases: ['payment gateways', 'payment processing', 'process payments', 'accept payments', 'secure payment', 'secure payments', 'stripe', 'paypal', 'paystack', 'razorpay', 'mercado pago', 'pagseguro', 'checkout flow', 'checkout process', 'custom checkout', 'subscription billing', 'billing system'] },
+  ],
 };

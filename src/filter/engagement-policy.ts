@@ -5,7 +5,8 @@ import { normalizeText, padWords } from '../text.js';
 import { budgetInUsd, formatUsd } from './budget.js';
 import { findTerms } from './keyword-match.js';
 import { classifyLocation, descriptionRestrictsLocation } from './location.js';
-import { MAX_PROPOSALS_FOR_ALERT, MAX_PROPOSALS_FOR_SHORTLIST } from './ranking.js';
+import { MAX_PROPOSALS_FOR_SHORTLIST, VERY_CROWDED_PROPOSALS } from './ranking.js';
+import { veryShortDeadlineHours } from './scope-risk.js';
 
 /** How much of the description counts as "the start": where a project states what it needs delivered. */
 const DESCRIPTION_LEAD_LENGTH = 500;
@@ -46,14 +47,14 @@ const TEAM_ROLE: readonly RegExp[] = [
  *  - location that excludes residents of Brazil       -> skip
  *  - location ambiguous, missing, or restricted in the description -> at most review
  *  - a senior title                                   -> at most review
- *  - a freelance project with more than 150 proposals -> skip (stored, never alerted automatically)
- *  - a freelance project with 61 to 150 proposals     -> at most review (crowded: never "a good opportunity")
+ *  - a freelance project with more than 60 proposals  -> at most review (crowded: never "a good opportunity"); above
+ *                                                       150 it is a review with the lowest priority, never a skip
  *  - a freelance main task that is not technical      -> skip (payroll, story writing... even with a skill tag)
  *  - a freelance main task that is unclear            -> at most review (no technical deliverable in the title or
  *                                                       the start of the description, or title and text disagree)
- *  - a fixed price or hourly rate whose top is under the USD floor -> skip
- *  - a range that crosses the USD floor (bottom under it, top at or over it) -> at most review
- *  - a budget with no reliable USD conversion         -> at most review (nothing is estimated)
+ *  - a budget whose top is under the USD floor, a range that crosses it, or no reliable USD conversion -> at most
+ *    review (the floors are floors for a SHORTLIST, never a reason to drop a technical opportunity)
+ *  - a very short deadline (24 hours or less) or a transactional scope (payments, checkout) -> at most review
  *  - a project language outside the profile languages -> at most review
  *  - a strong skill that appears only in the skill tags, never in the title or description -> at most review
  * Opportunities without an employmentType (sources of projects) are returned untouched.
@@ -69,17 +70,12 @@ export function applyEngagementPolicy(base: FilterResult, opportunity: Opportuni
   const outside = outsideCategory(opportunity, profile);
   if (outside) return skip(`category "${outside}" is not technology`);
 
-  if (type === 'freelance' && opportunity.proposalCount !== null && opportunity.proposalCount > MAX_PROPOSALS_FOR_ALERT) {
-    return skip(`too many proposals (${opportunity.proposalCount}) for an automatic alert`);
-  }
-
   // The main task has to be technical: tags and passing mentions do not count (see judgeMainTask).
   const mainTask = type === 'freelance' ? judgeMainTask(opportunity, profile) : null;
   if (mainTask?.verdict === 'skip') return skip(mainTask.reason);
 
-  // A budget under the USD floor is not worth an alert, whatever the skills (internal USD equivalent, see budget.ts).
+  // Budget, competition, deadline and scope never remove a relevant project: they limit it to a review (see below).
   const budget = type === 'freelance' ? judgeBudget(opportunity, profile) : null;
-  if (budget?.verdict === 'skip') return skip(budget.reason);
 
   // A source that publishes no location requirement at all (a projects marketplace) has nothing to judge here.
   const location = opportunity.locationRequirement === undefined ? null : classifyLocation(opportunity.locationRequirement);
@@ -91,10 +87,15 @@ export function applyEngagementPolicy(base: FilterResult, opportunity: Opportuni
   const info: string[] = [];
 
   if (mainTask?.verdict === 'unclear') caveats.push(mainTask.reason);
-  if (budget?.verdict === 'unconvertible' || budget?.verdict === 'crosses') caveats.push(budget.reason);
+  if (budget && budget.verdict !== 'ok') caveats.push(budget.reason);
   if (type === 'freelance' && opportunity.proposalCount !== null && opportunity.proposalCount > MAX_PROPOSALS_FOR_SHORTLIST) {
-    caveats.push(`crowded project (${opportunity.proposalCount} proposals): at most a review`);
+    caveats.push(
+      opportunity.proposalCount > VERY_CROWDED_PROPOSALS
+        ? `very crowded project (${opportunity.proposalCount} proposals): at most a review, lowest priority`
+        : `crowded project (${opportunity.proposalCount} proposals): at most a review`,
+    );
   }
+  if (type === 'freelance') caveats.push(...scopeRisks(opportunity, profile));
 
   if (type === 'unknown') caveats.push('employment type not stated');
   else if (type === 'other') caveats.push(`employment type "${String(opportunity.sourceMetadata.jobTypeRaw ?? 'other')}" is not recognized`);
@@ -182,13 +183,13 @@ function judgeMainTask(opportunity: Opportunity, profile: InterestProfile): Judg
   return { verdict: 'unclear', reason: 'technical deliverable is not clear in the title or the start of the description' };
 }
 
-type BudgetJudgement = { verdict: 'ok' } | { verdict: 'skip' | 'crosses' | 'unconvertible'; reason: string };
+type BudgetJudgement = { verdict: 'ok' } | { verdict: 'low' | 'crosses' | 'unconvertible'; reason: string };
 
 /**
- * The USD equivalent of the range against the profile floor: a top under the floor is skipped, a bottom at or over it
- * passes, and a range that crosses it (bottom under, top at or over; a missing bound counts as open) is at most a review.
- * A currency with no reliable rate is at most a review: no value is invented. No budget, or one that is neither fixed
- * nor hourly, is not judged.
+ * The USD equivalent of the range against the profile floor, which is a floor for a SHORTLIST: a bottom at or over it
+ * passes, a range that crosses it (bottom under, top at or over; a missing bound counts as open) and a top under it are
+ * both at most a review. A currency with no reliable rate is at most a review: no value is invented. No budget, or one
+ * that is neither fixed nor hourly, is not judged.
  */
 function judgeBudget(opportunity: Opportunity, profile: InterestProfile): BudgetJudgement {
   const floors = profile.budgetFloors;
@@ -204,13 +205,25 @@ function judgeBudget(opportunity: Opportunity, profile: InterestProfile): Budget
   const bottom = usd.minUsd ?? 0; // an unknown bottom could be anything
   const top = usd.maxUsd ?? Number.POSITIVE_INFINITY; // an unknown top could be anything
   if (top < floor) {
-    return { verdict: 'skip', reason: `${hourly ? 'hourly rate' : 'fixed budget'} of about US$${formatUsd(top)}${unit} is below the US$${floor}${unit} floor` };
+    return { verdict: 'low', reason: `${hourly ? 'hourly rate' : 'fixed budget'} of about US$${formatUsd(top)}${unit} is below the US$${floor}${unit} floor for a shortlist` };
   }
   if (bottom < floor) {
     const shown = `${usd.minUsd === null ? '?' : formatUsd(usd.minUsd)} to ${usd.maxUsd === null ? '?' : formatUsd(usd.maxUsd)}`;
     return { verdict: 'crosses', reason: `${hourly ? 'hourly' : 'fixed'} budget range of about US$${shown}${unit} crosses the US$${floor}${unit} floor: at most a review` };
   }
   return { verdict: 'ok' };
+}
+
+/** A very short deadline and a transactional scope: real projects, but risky, so at most a review. */
+function scopeRisks(opportunity: Opportunity, profile: InterestProfile): string[] {
+  const risks: string[] = [];
+  const text = `${opportunity.title}
+${opportunity.description}`;
+  const hours = veryShortDeadlineHours(text);
+  if (hours !== null) risks.push(`very short deadline (about ${hours} hours): at most a review`);
+  const transactional = findTerms(padWords(normalizeText(text)), profile.transactionalScope ?? [])[0];
+  if (transactional) risks.push('transactional scope (payments or checkout): at most a review');
+  return risks;
 }
 
 function looksLikeTeamRole(opportunity: Opportunity): boolean {
@@ -227,7 +240,9 @@ export function mainCaveat(reasons: readonly string[]): string | null {
     /^location .*(ambiguous|not stated)|^location not stated$|^description mentions/,
     /^employment type (not stated|".*" is not recognized)|^project language/,
     /^title names non-technical work|^technical deliverable is not clear/,
-    /^crowded project/,
+    / is below the US\$\d+(\/h)? floor for a shortlist$/,
+    /^(very )?crowded project/,
+    /^very short deadline|^transactional scope/,
     /^seniority in the title/,
     /^strong skills appear only as tags/,
     /^budget currency|budget range of about/,

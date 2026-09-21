@@ -5,6 +5,10 @@ import { mainCaveat } from '../filter/engagement-policy.js';
 import { formatBrasiliaTime } from './layout.js';
 import { translateReason } from './translate-reasons.js';
 
+export const LOW_BUDGET_TEXT = 'Orçamento baixo para o escopo; avalie se compensa pelo portfólio, avaliação ou experiência.';
+/** The stored reason of a budget below the floor for a shortlist (the USD equivalent is never shown in the message). */
+const BELOW_FLOOR = / is below the US\$\d+(\/h)? floor for a shortlist$/;
+
 /** The classification of an alert that comes from the deterministic filter alone. */
 export const CLASSIFICATION: Record<FilterDecision, string> = {
   shortlist: '🟢 BOA OPORTUNIDADE',
@@ -37,8 +41,9 @@ export function restrictedAccessText(opportunity: Opportunity, now: Date): strin
 }
 
 /**
- * The single main caveat of a basic alert, in this order: restricted access, project language, advanced scope, high
- * competition, then the most relevant stored reason (location, type, seniority, skills only in tags, weak signals).
+ * The single main caveat of a basic alert, in this order: restricted access, project language, advanced scope, a low
+ * budget (when it is the main stored caveat), high or very high competition, then the most relevant stored reason
+ * (location, type, deadline, scope, seniority, skills only in tags, weak signals).
  */
 export function basicAttention(opportunity: Opportunity, filter: FilterResult, now: Date): string | null {
   const restricted = restrictedAccessText(opportunity, now);
@@ -47,10 +52,14 @@ export function basicAttention(opportunity: Opportunity, filter: FilterResult, n
   if (language) return capitalize(translateReason(language));
   const advanced = filter.reasons.find((reason) => reason.startsWith('conflicting or advanced scope'));
   if (advanced) return capitalize(translateReason(advanced));
-  if (opportunity.proposalCount !== null && opportunity.employmentType !== undefined && competitionTier(opportunity) === 2) {
-    return `Concorrência alta: ${opportunity.proposalCount} propostas já enviadas.`;
-  }
   const caveat = mainCaveat(filter.reasons);
+  // A low budget is the main worry when it is the first caveat: it says what to weigh, not that the project is bad.
+  if (caveat !== null && BELOW_FLOOR.test(caveat)) return LOW_BUDGET_TEXT;
+  if (opportunity.proposalCount !== null && opportunity.employmentType !== undefined) {
+    const tier = competitionTier(opportunity);
+    if (tier === 3) return `Concorrência muito alta: ${opportunity.proposalCount} propostas já enviadas.`;
+    if (tier === 2) return `Concorrência alta: ${opportunity.proposalCount} propostas já enviadas.`;
+  }
   return caveat ? capitalize(translateReason(caveat)) : null;
 }
 
