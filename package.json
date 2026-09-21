@@ -17,6 +17,7 @@
     "notify:demo": "tsx src/cli/notify-demo.ts",
     "notify:preview": "tsx src/cli/notify-preview.ts",
     "notify:manual": "tsx src/cli/notify-manual.ts",
+    "hunter": "tsx src/cli/hunter.ts",
     "collect": "tsx src/cli/collect.ts",
     "backlog": "tsx src/cli/backlog.ts",
     "telegram:test": "tsx src/cli/telegram-test.ts"

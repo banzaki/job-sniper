@@ -1,6 +1,24 @@
 # STATUS
 
-Last updated: 2026-09-21 (PAUSE CHECKPOINT after a live Freelancer.com round on basic-v10, see below; SPEC 007.2 Telegram visual layout implemented and accepted; SPEC 007.1 is d63cda8, SPEC 007 is 22b855a, SPEC 006 is cbd1516. Workana is suspended by its terms of use)
+Last updated: 2026-09-21 (SPEC 008 OpenClaw Hunter Agent V1 implemented, see its section; PAUSE CHECKPOINT after a live Freelancer.com round on basic-v10, see below; SPEC 007.2 Telegram visual layout implemented and accepted; SPEC 007.1 is d63cda8, SPEC 007 is 22b855a, SPEC 006 is cbd1516. Workana is suspended by its terms of use)
+
+## SPEC 008 — OpenClaw Hunter Agent V1 (implemented; awaiting review)
+
+**Decision (RECON, official documentation and repository only):** OpenClaw is MIT, stewarded by the OpenClaw Foundation; latest npm `openclaw@2026.9.5` (2026-09-21); official install
+`npm install -g openclaw@latest` or the installers on openclaw.ai; **requires Node 24.16+ (<25) or 26.1+** (this machine has 24.12.0, so it was NOT installed). Telegram is a first-party channel (grammY,
+long polling by default, webhook optional; `dmPolicy: allowlist` + `allowFrom` with numeric ids; groups blocked unless allowlisted). Slash commands are handled before the model and can be authorized
+with `commands.allowFrom`; `tools.allow/deny` and exec approvals (`security: allowlist`, `argPattern`) restrict the agent to one program with fixed arguments; secrets are SecretRefs (env/file/exec/store);
+state lives in `~/.openclaw`. Job Sniper's bot is **outbound only** (`sendMessage`; no `getUpdates`, no webhook), so OpenClaw can read updates of the **same bot** by long polling without conflict: no second
+bot is needed unless a webhook is ever set on it. Sources: docs.openclaw.ai (channels/telegram, gateway/security/tool-permissions, tools/exec-approvals, tools/skills, tools/slash-commands, gateway/secrets, install)
+and github.com/openclaw/openclaw.
+
+**Built:** the façade `npm run hunter` (`status`, `hunt`, `top`, `more`, `help`, `ask`, `tick`; one JSON line), owner-only authorization, a hunt lock, a persistent schedule ledger, the OpenClaw skill and example
+configuration in `openclaw/`, `HUNTER_*` settings in `.env.example`. No filter, ranking, queue, message or schema change (still v6, basic-v10).
+
+**Acceptance (copy of the real database, simulated Telegram, real dry-run hunt):** see the mission report. **Known limits / to do by the owner:** OpenClaw itself is not installed (Node upgrade and a model
+provider credential are needed and were not asked for in chat); the files in `openclaw/` were written from the documentation and have not run against an installed OpenClaw; through a model-driven agent a hostile title
+could still try to induce a call to the allowed verbs (bounded: at most the owner's own 5 best alerts or a normal hunt, never a shell, secret or application), so deterministic slash-command dispatch through a small plugin
+tool is the recommended hardening (a later step); the schedule stays off; "aguardando" counts what the round left waiting for `libere mais 5`.
 
 ## PAUSE CHECKPOINT (2026-09-21) — operational and functional; next mission: SPEC 008 (OpenClaw Hunter Agent)
 

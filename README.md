@@ -323,6 +323,37 @@ later day (while its data is fresh). Overflow and backlog are never drained by t
 - **Counting.** Reports keep three numbers apart: automatic alerts used today (the only ones against the limit), manual real deliveries, and manual previews.
   `npm run backlog -- --send` and `notify:analyses` are manual too and never use the daily limit.
 
+## Hunter (SPEC 008): commands by Telegram and a schedule
+
+**Architecture.** OpenClaw (the owner's personal agent, official project `openclaw/openclaw`) is only the command and scheduling layer. Job Sniper remains the
+deterministic engine (collection, filter, ranking, queue, deduplication, Telegram). They meet at ONE small façade, `npm run hunter` (`dist/cli/hunter.js`): fixed verbs,
+validated arguments, **one line of JSON** on stdout: `{ "ok", "code", "command", "reply", "data" }`. The agent never imports Job Sniper code and never runs a free command;
+its exec permission is a single program with fixed argument shapes (`openclaw/exec-approvals.example.json`, kept identical to `src/agent/openclaw-contract.ts` by a test).
+
+| Say to the agent | Façade verb | What it does |
+| ---------------- | ----------- | ------------ |
+| `status` | `status` | Read only: enabled sources, mode (DRY_RUN or real), the last round (new, by class, delivered, waiting), automatic quota used and left today, manual deliveries and previews, next scheduled hunt, last error |
+| `caça agora` / `caça agora só no Freelancer` / `…só no 99Freelas` | `hunt [source]` | One run of the normal pipeline (`src/index.ts`) as a child process, with the AI stage off and the Gemini key blanked; one at a time (lock file); no retry after a failure |
+| `mostre as N melhores` (1 to 10) | `top N` | Read only: the fresh, non-skip entries of the latest round in the persisted ranking order: class, title, source, budget, proposals, age, `source:id` |
+| `libere mais 5` | `more` | Manual and explicit: sends the next lot of AT MOST 5 (fixed) of the latest round, in its persisted order, through the manual delivery (`notify:manual` rules); a skip, a stale, an invalid or an already delivered one is passed over without using a place; a Telegram failure stops it and keeps everything pending; it does **not** use the automatic daily quota and is reported apart; with `DRY_RUN=true` it only says what it would send |
+| `ajuda` | `help` | The catalogue |
+
+Anything else is refused by the façade itself (applying to jobs, changing the profile, "run this command", four sites, a number out of limits, a source outside Freelancer / 99Freelas
+/ the enabled ones). `ask --text "<phrase>"` is the deterministic parser for the owner's sentences (no model is involved in understanding them).
+
+**Safety.** Only the one Telegram user in `HUNTER_OWNER_TELEGRAM_ID` is obeyed, and only in a private chat (`--sender` and `--chat` must both equal it); anyone else, a group or a
+channel gets silence and nothing runs. Titles, descriptions and any platform text are data: titles are cleaned to one short line (control, zero-width and direction characters removed)
+and descriptions never appear in an answer. `DRY_RUN=true` blocks every send. Errors name a variable, never a value. Every action is logged (without ids or secrets) in `data/hunter.log`.
+
+**Schedule.** Off by default (`HUNTER_SCHEDULE_ENABLED=false`). A periodic `hunter tick` (every few minutes, from the OpenClaw scheduler or the operating system) runs the same hunt only inside a
+configured slot (`HUNTER_SCHEDULE_TIMES`, default 09:00 and 17:00 in `HUNTER_TIMEZONE`, default America/Sao_Paulo), within 20 minutes after it. A slot is written down before it runs, so a second tick,
+a restart or a failure never repeats it, and a slot that arrives while another hunt runs is delayed, not lost; a slot the machine missed is not made up. State is kept next to the database
+(`<db>.hunter.json`, `<db>.hunter.lock`); the SQLite schema is unchanged (still v6).
+
+**Setting OpenClaw up (one time, by the owner).** OpenClaw 2026.9.x needs Node 24.16+ (below 25) or 26.1+ and a model provider credential of its own; neither is part of this repository.
+`openclaw/` holds an example configuration (Telegram allowlist with the owner's id, one tool, exec approvals) and the skill; they were written from the official documentation and are to be
+checked with `openclaw doctor` at installation. The bot token stays in `.env` / OpenClaw's own secret store, never in these files.
+
 ## Filter (`basic-v10`)
 
 Deterministic, no AI. Every decision carries concrete reasons, the matched terms and the rule
@@ -423,6 +454,7 @@ When the rule version changes, stored decisions are re-evaluated automatically (
 | `npm run notify:demo`    | One demonstration delivery of a saved analysis (`-- --id <id> [--label x]`) |
 | `npm run notify:preview` | A "🧪 PRÉVIA MANUAL" of exactly one stored opportunity (`-- --only <source>:<id> [--send]`); repeatable, marks nothing |
 | `npm run notify:manual`  | The real delivery of exactly one never-delivered opportunity (`-- --only <source>:<id> [--send]`); ignores only the automatic daily limit |
+| `npm run hunter`         | The Hunter façade (`status`, `hunt`, `top`, `more`, `help`, `ask`, `tick`): one JSON line; owner only (`--sender` and `--chat`) |
 | `npm run backlog`        | List the owed backlog that automatic alerts never send (read only); `-- --send [--limit N]` sends the best N on purpose (obeys `DRY_RUN`) |
 | `npm run access:refresh` | Re-read one opportunity's detail (`-- --id <sourceId:externalId>`, 1 request) and update only its access |
 | `npm test`               | Offline tests (Node's built-in runner; no network, no Telegram, no Gemini) |
@@ -510,6 +542,8 @@ src/
   cli/notify-demo.ts             npm run notify:demo
   cli/notify-preview.ts          npm run notify:preview
   cli/notify-manual.ts           npm run notify:manual
+  cli/hunter.ts                  npm run hunter (the façade for OpenClaw and the schedule)
+  agent/                         Hunter: intents, authorization, lock, schedule, status/hunt/top/more, pipeline runner
   cli/opportunities.ts           npm run opportunities
   cli/telegram-test.ts           npm run telegram:test
   config.ts                      Environment settings with safe defaults

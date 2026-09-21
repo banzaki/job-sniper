@@ -149,6 +149,31 @@ export class AlertQueueStore {
     };
   }
 
+  /** The id of the most recent collection that recorded anything (a "manual:" prefix left by a manual delivery is not part of the id). */
+  latestBatchId(): string | null {
+    const row = this.db.prepare("SELECT MAX(CASE WHEN batch_id LIKE 'manual:%' THEN substr(batch_id, 8) ELSE batch_id END) AS b FROM alert_queue").get();
+    return typeof row?.b === 'string' ? row.b : null;
+  }
+
+  /** Every entry of one collection in its persisted order (rank), with whether Telegram already confirmed it. Read only. */
+  listBatch(batchId: string): { key: OpportunityKey; status: AlertStatus; rank: number; decision: string; notifiedAt: string | null; selectedAt: string }[] {
+    return this.db
+      .prepare(
+        `SELECT q.source_id, q.external_id, q.status, q.rank, q.decision, q.selected_at, o.notified_at FROM alert_queue q
+         JOIN opportunities o ON o.source_id = q.source_id AND o.external_id = q.external_id
+         WHERE q.batch_id = ? OR q.batch_id = 'manual:' || ? ORDER BY q.rank, q.source_id, q.external_id`,
+      )
+      .all(batchId, batchId)
+      .map((row) => ({
+        key: keyOf(row),
+        status: row.status as AlertStatus,
+        rank: Number(row.rank),
+        decision: String(row.decision),
+        notifiedAt: typeof row.notified_at === 'string' ? row.notified_at : null,
+        selectedAt: String(row.selected_at),
+      }));
+  }
+
   counts(): Record<AlertStatus, number> {
     const result: Record<AlertStatus, number> = { selected: 0, overflow: 0, expired: 0 };
     for (const row of this.db.prepare('SELECT status, COUNT(*) AS n FROM alert_queue GROUP BY status').all()) result[row.status as AlertStatus] = Number(row.n);

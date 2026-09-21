@@ -36,6 +36,8 @@ interface CommonOptions {
   format?: FormatOptions;
   /** Receives the rendered text when not sending. */
   print?: (text: string) => void;
+  /** Where a message is rendered when NOT sending (default: the console). It is never a real channel. */
+  renderSink?: Notifier;
   now?: () => Date;
 }
 
@@ -143,7 +145,7 @@ export async function deliverManual(options: ManualDeliveryOptions): Promise<Man
   const report = await notifyPending({
     store,
     // Without --send the message can only be printed: a real notifier is never used, whatever was passed.
-    notifier: options.send ? options.notifier : new ConsoleNotifier(),
+    notifier: options.send ? options.notifier : (options.renderSink ?? new ConsoleNotifier()),
     decisions: options.decisions,
     dryRun: !options.send,
     ...(options.analysisVersion ? { analysisVersion: options.analysisVersion } : {}),

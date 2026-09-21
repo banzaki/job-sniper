@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "agents": {
+    "job-sniper": {
+      "security": "allowlist",
+      "ask": "on-miss",
+      "allowlist": [
+        {
+          "pattern": "C:\\Program Files\\nodejs\\node.exe",
+          "argPattern": "^dist/cli/hunter\\.js (status|more|help|hunt( freelancer| 99freelas)?|top( ([1-9]|10))?|ask --text [A-Za-zÀ-ÿ0-9 ]{1,60}) --sender [0-9]{3,15} --chat [0-9]{3,15}$"
+        }
+      ]
+    }
+  }
+}

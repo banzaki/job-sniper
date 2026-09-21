@@ -1,0 +1,24 @@
+// EXAMPLE ONLY: written from docs.openclaw.ai (Telegram, tool permissions, exec approvals, cron) for OpenClaw 2026.9.x and NOT yet run
+// against an installed OpenClaw. After installing, check every key with `openclaw doctor` and adjust names that differ.
+// It holds no secret: the bot token is referenced (SecretRef), never written here. Put the owner's numeric id where OWNER_ID stands.
+{
+  channels: {
+    telegram: {
+      // The SAME bot Job Sniper already uses to send alerts: Job Sniper only calls sendMessage (no webhook, no getUpdates), and OpenClaw
+      // reads updates by long polling, so the two do not compete. A second bot is only needed if a webhook is ever set on this one.
+      botToken: { env: "TELEGRAM_BOT_TOKEN" }, // a SecretRef to an environment variable of the OpenClaw process; verify the exact shape
+      dmPolicy: "allowlist", // only the ids below may talk to the agent
+      allowFrom: ["OWNER_ID"], // numeric Telegram user id, never a user name
+      groupPolicy: "disabled", // groups and channels never run a tool (verify the accepted value; the documented default blocks groups)
+    },
+  },
+  commands: { allowFrom: ["OWNER_ID"] }, // the only authorization source for slash commands
+  tools: {
+    allow: ["exec"], // the agent sees one tool
+    deny: ["write", "edit", "gateway", "cron", "sessions_spawn", "sessions_send", "browser", "web_search"], // deny always wins
+    message: { crossContext: { allowAcrossProviders: false } },
+    sessions: { visibility: "self" },
+  },
+  // Exec is limited to ONE program with fixed argument shapes: see exec-approvals.example.json (same expression as
+  // src/agent/openclaw-contract.ts). On Windows the approvals are edited through the companion app or the native CLI.
+}

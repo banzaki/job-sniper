@@ -316,6 +316,24 @@ export class OpportunityStore {
     return Number(result.changes) === 1;
   }
 
+  /**
+   * What a collection that started at `since` did to the database: how many stored opportunities it saw (new or already known)
+   * and how many it stored for the first time, by decision. Optionally for one source. Read only.
+   */
+  activitySince(since: string, sourceId?: string): { seen: number; added: Record<string, number> } {
+    const where = sourceId === undefined ? '' : ' AND source_id = ?';
+    const args = sourceId === undefined ? [since] : [since, sourceId];
+    const seen = Number(this.db.prepare(`SELECT COUNT(*) AS n FROM opportunities WHERE last_seen_at >= ?${where}`).get(...args)?.n ?? 0);
+    const added: Record<string, number> = { top_match: 0, shortlist: 0, review: 0, skip: 0 };
+    for (const row of this.db.prepare(`SELECT filter_decision AS d, COUNT(*) AS n FROM opportunities WHERE first_seen_at >= ?${where} GROUP BY 1`).all(...args)) added[String(row.d)] = Number(row.n);
+    return { seen, added };
+  }
+
+  /** The newest time a collection saw each source (the last time any of its opportunities was seen). Read only. */
+  lastSeenBySource(): Record<string, string> {
+    return Object.fromEntries(this.db.prepare('SELECT source_id AS s, MAX(last_seen_at) AS t FROM opportunities GROUP BY 1').all().map((row) => [String(row.s), String(row.t)]));
+  }
+
   count(): number {
     const row = this.countStatement.get();
     const total = row?.total;
