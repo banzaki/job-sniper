@@ -138,15 +138,50 @@ export const donBrunoProfile: InterestProfile = {
     { term: 'copywriting', aliases: ['copywriter', 'copy editing', 'proofreading', 'proofreader', 'article writing', 'blog post', 'blog posts', 'content writing', 'content writer', 'essay', 'essays', 'thesis', 'redacao', 'revisao de texto'] },
     { term: 'translation', aliases: ['translator', 'transcription', 'transcriber', 'subtitling', 'voice over', 'voiceover', 'voice actor', 'traducao', 'tradutor', 'transcricao'] },
     { term: 'trading', aliases: ['trader', 'forex', 'stock market', 'day trading', 'crypto trading', 'investment advice'] },
-    { term: 'virtual assistant', aliases: ['administrative assistant', 'admin assistant', 'personal assistant', 'data entry', 'lead generation', 'cold calling', 'telemarketing', 'customer support', 'customer service', 'recruiter', 'recruiting', 'resume writing', 'cv writing', 'digitacao'] },
+    { term: 'virtual assistant', aliases: ['chat support', 'chat agent', 'chat operator', 'live chat', 'customer care', 'support agent', 'call center', 'administrative assistant', 'admin assistant', 'personal assistant', 'data entry', 'lead generation', 'cold calling', 'telemarketing', 'customer support', 'customer service', 'recruiter', 'recruiting', 'resume writing', 'cv writing', 'digitacao'] },
     { term: 'sales', aliases: ['sales representative', 'sales agent', 'sales manager', 'social media management', 'social media manager', 'influencer', 'vendedor', 'vendas'] },
     { term: 'video editing', aliases: ['video editor', 'photo editing', 'photography', 'photographer', 'logo design', 'graphic design', 'illustration', 'illustrator', 'music production', 'interior design', 'edicao de video'] },
   ],
 
-  // USD equivalents. Configurable defaults: floors for a SHORTLIST, not for eligibility (a lower budget is a review).
+  // USD equivalents. Configurable defaults: a budget whose bottom reaches its floor is needed for a TOP MATCH. A lower
+  // budget never removes an opportunity and does not cap it: it is a caveat that lowers the ranking.
   budgetFloors: { fixedUsd: 50, hourlyUsd: 8 },
 
-  transactionalScope: [
-    { term: 'payment gateway', aliases: ['payment gateways', 'payment processing', 'process payments', 'accept payments', 'secure payment', 'secure payments', 'stripe', 'paypal', 'paystack', 'razorpay', 'mercado pago', 'pagseguro', 'checkout flow', 'checkout process', 'custom checkout', 'subscription billing', 'billing system'] },
+  // Advanced only when the MAIN delivery is transactional. A shop that just mentions PayPal is an ordinary shop.
+  transactionalScope: {
+    titleTerms: [
+      { term: 'payment', aliases: ['payments', 'payment gateway', 'payment gateways', 'checkout', 'billing', 'subscription', 'subscriptions', 'ticketing', 'ticket booking', 'booking system', 'reservation system', 'stripe', 'paypal', 'wallet', 'invoicing', 'pagamento', 'pagamentos', 'cobranca', 'assinatura', 'assinaturas'] },
+    ],
+    central: [
+      { term: 'recurring billing', aliases: ['recurring payments', 'subscription billing', 'subscription payments', 'subscription management', 'multiple payment gateways', 'multi gateway', 'payment processing', 'custom checkout', 'checkout flow', 'ticketing', 'booking engine', 'booking system', 'reservation system', 'financial transactions', 'payouts', 'escrow', 'split payments', 'cobranca recorrente'] },
+    ],
+    objects: [{ term: 'payment', aliases: ['payments', 'payment gateway', 'payment gateways', 'billing', 'subscription', 'subscriptions', 'pagamento', 'pagamentos'] }],
+    actions: ['implement', 'integrat', 'fix', 'debug', 'repair', 'troubleshoot', 'custom', 'build', 'develop', 'creat', 'set up', 'setup', 'configur', 'add', 'implementar', 'integrar', 'corrigir', 'criar', 'desenvolver'],
+  },
+
+  // Skills the profile does not offer. Central to the work (title, or the start of the description with no available skill
+  // named) it is a skip; beside an available skill it is a doubt.
+  unavailableSkills: [
+    { term: 'python', aliases: ['django', 'flask', 'fastapi', 'pandas'] },
+    { term: 'rust' },
+    { term: 'golang' },
+    { term: 'java', aliases: ['spring boot'] },
+    { term: 'c sharp', aliases: ['csharp', 'dotnet', 'asp net', 'vb net'] },
+    { term: 'ruby', aliases: ['ruby on rails', 'rails'] },
+    { term: 'mobile app', aliases: ['mobile apps', 'mobile application', 'mobile applications', 'android app', 'android apps', 'ios app', 'ios apps', 'iphone app', 'cross platform app', 'aplicativo mobile', 'aplicativo para celular', 'flutter', 'react native', 'kotlin', 'swiftui', 'android nativo', 'ios nativo', 'app nativo', 'aplicativo nativo'] },
+    { term: 'game development', aliases: ['game developer', 'unity', 'unreal engine', 'godot'] },
+    { term: 'machine learning', aliases: ['deep learning', 'data science', 'data scientist', 'computer vision', 'neural network'] },
+    { term: 'devops', aliases: ['kubernetes', 'k8s', 'terraform', 'ci cd', 'docker swarm'] },
+    { term: 'blockchain', aliases: ['web3', 'smart contract', 'smart contracts', 'solidity', 'nft'] },
+    { term: 'embedded', aliases: ['firmware', 'arduino', 'raspberry pi'] },
+    { term: 'voip', aliases: ['pabx', 'asterisk', 'telefonia'] },
+  ],
+
+  offTopicUnlessStrong: [
+    { term: 'meta ads', aliases: ['facebook ads', 'instagram ads', 'google ads', 'tiktok ads', 'social media ads', 'ads campaign', 'ad campaigns', 'ad account', 'ad accounts', 'paid acquisition', 'paid social', 'ppc', 'media buying', 'seo', 'search engine optimization'] },
+  ],
+
+  largeScopeSignals: [
+    { term: 'enterprise', aliases: ['marketplace', 'saas', 'erp', 'crm', 'multi vendor', 'multi tenant', 'microservices', 'social network', 'learning management system', 'lms'] },
   ],
 };

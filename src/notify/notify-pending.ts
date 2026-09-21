@@ -29,8 +29,8 @@ export interface NotifyOptions {
    */
   maxAgeHoursBySource?: Readonly<Record<string, number>>;
   /**
-   * Most notifications sent in this run, across ALL sources. Owed items are ranked first (shortlist, crowding tier, most
-   * recent day, strong skills, fewer proposals, stable id); those that do not fit stay pending and are never marked.
+   * Most notifications sent in this run, across ALL sources. Owed items are ranked first (top match, shortlist, review; then a very
+   * crowded one last, a clear main task, most recent day, fewer caveats, budget, fewer proposals, strong skills, stable id); those that do not fit stay pending and are never marked.
    */
   maxAlerts?: number;
   now?: () => Date;

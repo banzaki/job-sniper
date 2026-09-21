@@ -41,7 +41,7 @@ test('the job message follows the shared layout: pay as published, type and requ
   assert.ok(visibleLength(text) <= 1000, `${visibleLength(text)} characters`);
   const blocks = text.split('\n\n');
   assert.equal(blocks[0], '<b>🚨 NOVA OPORTUNIDADE</b>');
-  assert.equal(blocks[1], '<b>🟢 BOA OPORTUNIDADE</b>');
+  assert.equal(blocks[1], '<b>🟢 OPORTUNIDADE COMPATÍVEL</b>');
   assert.equal(blocks[2], '<b>React Developer</b>\n🌐 Remotive · 🆕 Publicada há 1 dia');
   assert.ok(blocks[3]!.startsWith('💰 Remuneração (como publicada): $50k - $70k\n🧰 Tipo: Freelance\n📍 Localização exigida: Worldwide\n'));
   assert.ok(blocks[3]!.endsWith('🎯 Compatibilidade: alta'));
@@ -103,7 +103,7 @@ test('external text is escaped, and only a safe link is linked', () => {
 });
 
 test('the preview is identified, and the project layout of the other source is unchanged in kind', () => {
-  assert.ok(message(collected(), true).startsWith('<b>🧪 PRÉVIA DE FORMATO</b>\n\n<b>🟢 BOA OPORTUNIDADE</b>'));
+  assert.ok(message(collected(), true).startsWith('<b>🧪 PRÉVIA DE FORMATO</b>\n\n<b>🟢 OPORTUNIDADE COMPATÍVEL</b>'));
   assert.ok(!message(collected()).includes('PRÉVIA'));
 
   const project = makeOpportunity('7', { title: 'Landing page' });

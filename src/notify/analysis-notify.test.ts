@@ -56,7 +56,7 @@ test('a new opportunity with an analysis gets ONE compact message, with sound; b
   const report = await notify(store, notifier);
   assert.equal(notifier.sent.length, 1, 'exactly one message per opportunity');
   assert.equal(notifier.sent[0]!.silent, false);
-  assert.match(notifier.sent[0]!.text, /BOA OPORTUNIDADE/);
+  assert.match(notifier.sent[0]!.text, /OPORTUNIDADE COMPATÍVEL/);
   assert.ok(!/ANÁLISE ATUALIZADA|PRÉVIA/.test(notifier.sent[0]!.text));
   assert.ok(notifier.sent[0]!.text.startsWith('<b>🚨 NOVA OPORTUNIDADE</b>'));
   assert.ok(visibleLength(notifier.sent[0]!.text) <= COMPACT_CEILING);
@@ -102,7 +102,7 @@ test('without an analysis the basic pt-BR message is sent; the analysis that arr
 
   const first = await notify(store, notifier);
   assert.deepEqual(first.kinds, { basic: 1, enriched: 0, aiUpdate: 0 });
-  assert.match(notifier.sent[0]!.text, /BOA OPORTUNIDADE|VALE REVISAR/);
+  assert.match(notifier.sent[0]!.text, /OPORTUNIDADE COMPATÍVEL|VALE REVISAR/);
   assert.match(notifier.sent[0]!.text, /🧩 Habilidades: HTML/);
   assert.ok(!/Fit score|Access:|Source:/.test(notifier.sent[0]!.text), 'no English labels');
 
@@ -339,7 +339,7 @@ test('a former multi-part delivery of which nothing reached the owner is deliver
   const report = await notify(store, notifier);
   assert.deepEqual(report.legacyDeliveries, [{ id: 'fake:1', partsSent: 0, partsTotal: 2, held: false }]);
   assert.equal(notifier.sent.length, 1);
-  assert.match(notifier.sent[0]!.text, /BOA OPORTUNIDADE/);
+  assert.match(notifier.sent[0]!.text, /OPORTUNIDADE COMPATÍVEL/);
   assert.ok(!/former format/.test(notifier.sent[0]!.text), 'the old stored parts are never sent');
   assert.deepEqual(store.deliveries.parts(legacy.id).map((part) => part.status), ['pending', 'pending']);
   assert.ok(store.analyses.get(key('1'), ANALYSIS_VERSION)!.notifiedAt);

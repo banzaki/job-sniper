@@ -2,6 +2,7 @@ import type { FilterResult } from '../domain/filter-result.js';
 import type { Opportunity } from '../domain/opportunity.js';
 import type { InterestProfile } from '../profile/interest-profile.js';
 import { normalizeText, padWords } from '../text.js';
+import type { ExchangeRateLookup } from '../storage/exchange-rate-store.js';
 import { applyEngagementPolicy } from './engagement-policy.js';
 import { findTerms } from './keyword-match.js';
 
@@ -17,8 +18,13 @@ import { findTerms } from './keyword-match.js';
  * basic-v7: a low budget, a lot of competition (even above 150 proposals), a very short deadline and a transactional
  * scope no longer skip a technically relevant project: they limit it to a review (the floors are floors for a
  * shortlist, not for eligibility). `skip` is kept for what is irrelevant, closed, not technology or incompatible.
+ * basic-v8: the commercial ladder. `top_match` (excellent match) is added above `shortlist`; technical compatibility is
+ * judged apart from attractiveness (a low or crossing budget and a lot of competition are caveats that lower the ranking,
+ * they no longer cap a shortlist); a central skill the profile does not offer, chat support and marketing tasks are
+ * skipped; a transactional scope only counts when it is the main delivery; budgets convert with a fresh (24 hours) rate
+ * cached per source and currency. Results for 99Freelas are unchanged.
  */
-export const FILTER_RULE_VERSION = 'basic-v7';
+export const FILTER_RULE_VERSION = 'basic-v8';
 
 interface CategoryInfo {
   direct: string | null;
@@ -55,8 +61,9 @@ export function evaluateOpportunity(
   opportunity: Opportunity,
   profile: InterestProfile,
   now: Date = new Date(),
+  rates?: ExchangeRateLookup,
 ): FilterResult {
-  return applyEngagementPolicy(evaluateSkills(opportunity, profile, now), opportunity, profile);
+  return applyEngagementPolicy(evaluateSkills(opportunity, profile, now), opportunity, profile, rates ? { now, rates } : { now });
 }
 
 function evaluateSkills(opportunity: Opportunity, profile: InterestProfile, now: Date): FilterResult {

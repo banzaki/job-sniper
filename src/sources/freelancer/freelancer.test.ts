@@ -389,6 +389,18 @@ test('a missing token or a 401 in Freelancer never stops the other sources', asy
   assert.ok(!lines.join('\n').includes(TOKEN));
 });
 
+test('in the pipeline: the rate the API publishes is kept per source and currency with its observation time, and reused by older rows', async () => {
+  const store = new OpportunityStore(':memory:');
+  const inr = project(1, { currency: { code: 'INR', id: 11, exchange_rate: 0.0104 }, budget: { minimum: 12_500, maximum: 37_500 } });
+  const { api } = fakeApi(standard([inr, project(2)]));
+  await runPipeline({ source: source(api, store).source, store, profile: donBrunoProfile, maxPages: 1, targetNew: 100, maxDetailsPerRun: 20, now: () => NOW });
+
+  assert.deepEqual(store.exchangeRates.lookup('freelancer', 'INR'), { rateToUsd: 0.0104, observedAt: NOW.toISOString() });
+  assert.equal(store.exchangeRates.lookup('freelancer', 'USD'), null, 'a currency the API published no rate for is not invented');
+  assert.equal(store.exchangeRates.lookup('remotive', 'INR'), null, 'a rate belongs to its source');
+  assert.deepEqual(store.get({ sourceId: 'freelancer', externalId: '1' })!.opportunity.budget, { currency: 'INR', kind: 'fixed', min: 12_500, max: 37_500 }, 'the original budget is kept');
+});
+
 test('in the pipeline: stored once, the second run finds them known, and the same id in another source is another opportunity', async () => {
   const store = new OpportunityStore(':memory:');
   const { api, calls } = fakeApi(standard([project(1), project(2, { title: 'Senior WordPress team member', description: 'Join our team long term.' })]));

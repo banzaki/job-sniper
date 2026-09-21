@@ -34,7 +34,7 @@ export interface RenderedPart {
 }
 
 const CLASSIFICATION: Record<Recommendation, string> = {
-  apply: '🟢 BOA OPORTUNIDADE',
+  apply: '🟢 OPORTUNIDADE COMPATÍVEL',
   review: '🟡 VALE REVISAR',
   wait: '🕒 AGUARDAR LIBERAÇÃO',
   skip: '🔴 NÃO VALE A PENA',

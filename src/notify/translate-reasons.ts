@@ -50,7 +50,17 @@ const RULES: { pattern: RegExp; render: (match: RegExpExecArray) => string }[] =
     pattern: /^strong skills appear only as tags, not in the title or description$/,
     render: () => 'as habilidades aparecem só como tags, não no título nem na descrição',
   },
-  { pattern: /^crowded project \((\d+) proposals\): at most a review$/, render: (m) => `concorrência alta (${m[1]} propostas): no máximo revisar` },
+  { pattern: /^crowded project \((\d+) proposals\): lowers the ranking$/, render: (m) => `concorrência alta (${m[1]} propostas): reduz a posição na fila` },
+  { pattern: /^very crowded project \((\d+) proposals\): lowest priority in its group$/, render: (m) => `concorrência muito alta (${m[1]} propostas): última do seu grupo` },
+  { pattern: /^(?:fixed budget|hourly rate) of about US\$ ([\d.]+)(\/h)? is below the US\$ (\d+)(\/h)? floor$/, render: (m) => `orçamento baixo: cerca de US$ ${brNumber(m[1]!)}${m[2] ?? ''} (referência: US$ ${m[3]}${m[4] ?? ''})` },
+  { pattern: /^(?:fixed|hourly) budget range of about US\$ (.+?)(\/h)? crosses the US\$ (\d+)(\/h)? floor$/, render: (m) => `faixa de orçamento (cerca de US$ ${brNumber(m[1]!)}${m[2] ?? ''}) atravessa o piso de US$ ${m[3]}${m[4] ?? ''}` },
+  { pattern: /^budget currency "(.+)" has no fresh USD conversion: not a top match$/, render: (m) => `sem taxa de câmbio recente para ${m[1]}: não pode ser match excelente` },
+  { pattern: /^budget currency not stated: not a top match$/, render: () => 'moeda do orçamento não informada: não pode ser match excelente' },
+  { pattern: /^top match: .+$/, render: () => 'match excelente: habilidade forte logo no início, escopo pequeno ou médio, descrição clara, orçamento acima do piso e pouca concorrência' },
+  { pattern: /^central skill outside the profile: "(.+)" in the title$/, render: (m) => `habilidade central fora do perfil: "${m[1]}" no título` },
+  { pattern: /^central skill outside the profile: "(.+)" at the start of the description$/, render: (m) => `habilidade central fora do perfil: "${m[1]}" no início da descrição` },
+  { pattern: /^essential skill outside the profile: "(.+)" beside an available skill$/, render: (m) => `habilidade essencial fora do perfil ("${m[1]}") ao lado de uma habilidade disponível` },
+  { pattern: /^main task is not technical: "(.+)" in the title and no strong technical skill named there$/, render: (m) => `a tarefa principal não é técnica: "${m[1]}" no título, sem habilidade técnica forte` },
   {
     pattern: /^main task is not technical: "(.+)" in the title and no technical deliverable in the title or the start of the description$/,
     render: (m) => `a tarefa principal não é técnica: "${m[1]}" no título e nenhuma entrega técnica no título nem no início da descrição`,
@@ -67,15 +77,6 @@ const RULES: { pattern: RegExp; render: (match: RegExpExecArray) => string }[] =
     pattern: /^technical deliverable is not clear in the title or the start of the description$/,
     render: () => 'a entrega técnica não está clara no título nem no início da descrição',
   },
-  { pattern: /^fixed budget of about US\$([\d.]+) is below the US\$(\d+) floor for a shortlist$/, render: (m) => `orçamento fixo de cerca de US$${m[1]} abaixo do mínimo de US$${m[2]} para shortlist` },
-  { pattern: /^hourly rate of about US\$([\d.]+)\/h is below the US\$(\d+)\/h floor for a shortlist$/, render: (m) => `valor por hora de cerca de US$${m[1]}/h abaixo do mínimo de US$${m[2]}/h para shortlist` },
-  {
-    pattern: /^(fixed|hourly) budget range of about US\$(.+?)(\/h)? crosses the US\$(\d+)(\/h)? floor: at most a review$/,
-    render: (m) => `faixa de orçamento (cerca de US$${m[2]}${m[3] ?? ''}) atravessa o mínimo de US$${m[4]}${m[5] ?? ''}: no máximo revisar`,
-  },
-  { pattern: /^budget currency "(.+)" has no reliable USD conversion$/, render: (m) => `moeda do orçamento (${m[1]}) sem conversão confiável para dólar` },
-  { pattern: /^budget currency not stated: no reliable USD conversion$/, render: () => 'moeda do orçamento não informada' },
-  { pattern: /^very crowded project \((\d+) proposals\): at most a review, lowest priority$/, render: (m) => `concorrência muito alta (${m[1]} propostas): no máximo revisar, prioridade mínima` },
   { pattern: /^very short deadline \(about (\d+) hours\): at most a review$/, render: (m) => `prazo muito curto (cerca de ${m[1]} horas): no máximo revisar` },
   { pattern: /^transactional scope \(payments or checkout\): at most a review$/, render: () => 'escopo transacional (pagamentos ou checkout): no máximo revisar' },
   { pattern: /^project language "(.+)" is not one of the profile languages$/, render: (m) => `idioma do projeto ("${m[1]}") fora dos idiomas do perfil` },
@@ -91,6 +92,9 @@ const RULES: { pattern: RegExp; render: (match: RegExpExecArray) => string }[] =
   },
   { pattern: /^seniority in the title: (.+)$/, render: (m) => `senioridade no título: ${m[1]}` },
 ];
+
+/** A number in Brazilian style: a decimal comma ("7.8–13" becomes "7,8–13"). */
+const brNumber = (text: string): string => text.replace(/\./g, ',');
 
 export function translateReason(reason: string): string {
   for (const rule of RULES) {

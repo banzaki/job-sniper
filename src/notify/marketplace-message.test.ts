@@ -43,7 +43,7 @@ test('the project message follows the shared layout: source, recency, budget wit
   assert.ok(visibleLength(text) <= 1000, `${visibleLength(text)} characters`);
   const blocks = text.split('\n\n');
   assert.equal(blocks[0], '<b>🚨 NOVA OPORTUNIDADE</b>');
-  assert.equal(blocks[1], '<b>🟢 BOA OPORTUNIDADE</b>');
+  assert.equal(blocks[1], '<b>🟢 OPORTUNIDADE COMPATÍVEL</b>');
   assert.equal(blocks[2], '<b>Responsive landing page in React</b>\n🌐 Freelancer.com · 🆕 Publicada há 1 dia');
   const facts = blocks[3]!.split('\n');
   assert.deepEqual(facts.slice(0, 3), ['💰 Orçamento: US$ 250–500', '👥 Concorrência: 14 propostas', '🧰 Tipo: preço fixo']);

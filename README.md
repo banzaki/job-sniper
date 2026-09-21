@@ -209,7 +209,7 @@ message** (under 1,000 visible characters) in the same visual layout, built only
 ```text
 🚨 NOVA OPORTUNIDADE
 
-🟢 BOA OPORTUNIDADE
+🟢 OPORTUNIDADE COMPATÍVEL
 
 Título
 🌐 Freelancer.com · 🆕 Publicada hoje
@@ -233,7 +233,7 @@ Principal ressalva relevante.
 
 - **Header** says why the message exists: `🚨 NOVA OPORTUNIDADE` (a real new opportunity), `🧪 PRÉVIA DE FORMATO` (a manual preview only) or
   `🔄 ANÁLISE ATUALIZADA` (an older opportunity whose analysis arrived later). A real opportunity never carries preview wording.
-- **Classification:** `🟢 BOA OPORTUNIDADE` (shortlist or an AI "apply"), `🟡 VALE REVISAR` (review), `🕒 AGUARDAR LIBERAÇÃO` and `🔴 NÃO VALE A PENA` (AI only).
+- **Classification (the commercial ladder):** `🔵 MATCH EXCELENTE` (top match), `🟢 OPORTUNIDADE COMPATÍVEL` (shortlist, or an AI "apply"), `🟡 VALE REVISAR` (review), `🕒 AGUARDAR LIBERAÇÃO` and `🔴 NÃO VALE A PENA` (AI only).
 - **Facts:** the client's budget in its original currency (never converted, never called a suggested price), competition, fixed or hourly, at most
   four relevant skills (only those the filter found, only when there are any), and the compatibility in words (the current deterministic filter:
   high, medium or low). For a jobs source (Remotive) the facts are the pay as published, the type and the required location.
@@ -268,17 +268,18 @@ so in rare cases one message may appear twice. It is never silently dropped.
 saved opportunity (its saved analysis if it has one, otherwise its basic message; no AI, no site access). It is stored as its own delivery, so it
 never marks the real notification, and repeating it with the same label sends nothing new. With `DRY_RUN=true` it only prints and writes nothing.
 
-**Ranking and limit.** Everything is stored, but a run sends at most `MAX_TELEGRAM_ALERTS_PER_RUN` (5) Telegram alerts **in total, across all
-sources**. Owed alerts are ranked first: (1) shortlist before review; (2) a very crowded project (more than 150 proposals) after everything else
-of the same decision; (3) the better budget (reaches the floor, crosses it, no reliable conversion, below it); (4) crowding tier of a project
-marketplace: up to 20 proposals is high priority, 21-60 normal, 61-150 reduced (a source without proposal counts is normal); (5) the most recent
-publication day (Brasília calendar day; unknown last); (6) more strong skills; (7) fewer proposals; (8) the stable id, so the order never depends on
-insertion order. What does not fit stays **pending and unmarked** and is sent by a later run; data older than the source allows is withheld first
-and does not use a slot. The cap is never lifted to make room. Competition, budget, deadline and scope **never remove** a technically relevant project:
-they limit it to `review` and lower its priority (see the filter below). A project in a language outside the profile languages (`pt`, `en`) is at most
-a review. The 99Freelas decisions are not touched by these rules.
+**The commercial ladder and the ranking.** Every opportunity ends in one of four decisions: `top_match` (🔵 excellent match), `shortlist` (🟢 compatible
+opportunity), `review` (🟡 worth reviewing: a real doubt or gap) and `skip` (never notified). Technical compatibility is judged **apart from
+attractiveness**: budget, competition and recency lower the ranking and add caveats, they do not turn a technically compatible project into a review
+or a skip. Everything is stored, but a run sends at most `MAX_TELEGRAM_ALERTS_PER_RUN` (5) Telegram alerts **in total, across all sources**, best
+first: top matches, then shortlist, then review. Inside each group: (1) a very crowded project (more than 150 proposals) goes last; (2) a clearly
+relevant main task first; (3) the most recent publication day (Brasília calendar day; unknown last); (4) fewer caveats; (5) the better budget
+(reaches the floor, crosses it, no fresh conversion, below it); (6) fewer proposals; (7) more strong skills; (8) the stable `source:id`, so the order
+never depends on insertion order. What does not fit stays **pending and unmarked** and is sent by a later run; data older than the source allows is
+withheld first and does not use a slot. The cap is never lifted to make room. `top_match` is produced only for sources that publish an engagement type
+(Freelancer.com, Remotive); 99Freelas decisions are not touched by these rules.
 
-## Filter (`basic-v7`)
+## Filter (`basic-v8`)
 
 Deterministic, no AI. Every decision carries concrete reasons, the matched terms and the rule
 version. Signals are searched in title, description and skills:
@@ -308,28 +309,45 @@ when the text mentions a skill word; a freelance job that reads like a continuin
 Freelancer.com projects are freelance by nature and have no location requirement, so only the type, category, team-role, seniority and
 tag rules apply to them. Projects from 99Freelas have no such fields and are evaluated exactly as before.
 
-**Freelance projects (`basic-v7`, quality rules).** Only for sources with an engagement type (Freelancer.com, Remotive), and only lowering.
-`skip` means irrelevant, closed, not technology, forbidden or really incompatible; **a low budget, a lot of competition, a short deadline and a
-risky scope never skip a technically relevant project**, they cap it at `review` and lower its priority:
+**Freelance projects (`basic-v8`).** Only for sources with an engagement type (Freelancer.com, Remotive). A second step runs after the skill rules
+and only lowers the result, except the last one, which may name an excellent match:
 
-- **Main task.** Tags and passing mentions are not enough: the title and the **start of the description** (first 500 characters) must show a
-  technical deliverable (site, landing page, WordPress, API, integration, bot, automation, bug fix...). A non-technical main task (payroll,
-  story writing, trading, copywriting, translation, data entry...) is **skipped** even with a skill tag; a title that names non-technical work
-  over a technical description, or no clear deliverable at all, is at most `review`. The vocabulary lives in `src/profile/don-bruno.ts`
-  (`deliverableSignals`, `offTopicTasks`).
-- **Budget.** The original budget and currency are kept as the source states them. The filter compares the range as an **internal USD equivalent** (using the `exchange_rate`
-  the official Freelancer.com API publishes for the currency, saved in `sourceMetadata.exchangeRateToUsd`) with the floors **US$50** (fixed)
-  and **US$8/h** (hourly), defaults in `budgetFloors` of the profile. These are floors **for a shortlist**, not for eligibility: a range whose **bottom
-  reaches the floor** may be a shortlist; a range that **crosses** it (for example US$7.80 to 13/h) and a range **under** it are at most `review`
-  (a low budget is the main worry of the message: "Orçamento baixo para o escopo; avalie se compensa pelo portfólio, avaliação ou experiência."). A
-  missing bound is treated as open. A currency with no reliable rate is at most `review`; nothing is estimated. The conversion is not shown in Telegram.
-- **Competition.** Up to 60 proposals may be shortlisted; more than 60 is at most `review`; more than 150 is still a `review`, with the lowest priority
-  (sent after every other review), never a skip by itself.
-- **Deadline and scope.** A very short deadline (24 hours or less, written in the text) or a transactional scope (payments, checkout: Stripe, PayPal,
-  payment gateways...) is at most `review` (`transactionalScope` in the profile). Advanced scope was already a review.
+- **`skip`** (irrelevant, closed, not technology, out of scope, incompatible): a category that is not technology; a **main task that is not
+  technical** (payroll, story writing, trading, copywriting, translation, data entry, **chat support, customer support, virtual assistant**, and marketing
+  such as **ads and SEO** when the title names no strong technical skill); a **central skill the profile does not offer** (another language such as Python
+  or Rust, native or cross-platform mobile apps, games, machine learning, DevOps, blockchain...) in the title, or at the start of the description with no
+  available skill beside it; a continuing team role; a location that excludes residents of Brazil. These are general rules with vocabulary in
+  `src/profile/don-bruno.ts` (`offTopicTasks`, `offTopicUnlessStrong`, `unavailableSkills`), not exceptions by id.
+- **`review`** (a real doubt or gap): an unclear main task (no technical deliverable in the title or the first 500 characters of the description, or title and
+  description disagree); an essential skill outside the profile **beside** an available one; a strong skill named only in the skill tags; a senior
+  title; an advanced scope; a **very short deadline** (24 hours or less, written in the text); a **transactional main delivery**; a missing or unrecognized
+  type; an ambiguous location; a language outside the profile.
+- **`shortlist`** (technically compatible): everything else with a strong skill in the text. A **low or crossing budget** and **competition** are caveats
+  that lower the ranking and appear as a warning in the message; they never cap or remove it.
+- **`top_match`**: a shortlist that also has a strong skill in the title or the start of the description, a small or medium scope (no large-scope word,
+  not a very long brief), a description with at least 150 characters, a **known budget whose bottom fully reaches the floor**, and **at most 60 proposals**
+  (when the count is published). Any doubt or a missing budget keeps it a shortlist.
+- **Transactional scope is contextual.** Only when the main delivery is payments, checkout, subscriptions, ticketing or bookings: a payment word in the
+  title, a strongly transactional delivery at the start of the description (recurring billing, multiple gateways, custom checkout, ticketing...), or a
+  payment object right after an implementing verb ("integrate a payment gateway", "fix the billing"). A shop that just says customers pay with PayPal is an
+  ordinary shop.
+- **Budget.** The original budget and currency are kept exactly as the source states them. The filter compares the range with the floors **US$50**
+  (fixed) and **US$8/h** (hourly), defaults in `budgetFloors`, as an internal USD equivalent that is never shown converted in Telegram. A range whose
+  top is under the floor ("Orçamento baixo para o escopo; avalie se compensa pelo portfólio, avaliação ou experiência.") and a range that crosses it
+  (shown as `US$ 16–130`) are caveats. A missing bound is treated as open.
+- **Exchange rate, per source and currency, valid for 24 hours.** USD needs none. Any other currency uses the rate the official Freelancer.com API
+  published (`currency.exchange_rate`), stored in the table `exchange_rates` by `(source_id, currency_code)` with `observed_at` and reused by every stored
+  opportunity of the same source and currency, with no request per opportunity. Older than 24 hours, or absent, it only **withholds the top match**: the
+  opportunity stays, the original budget is never changed and nothing is estimated. Rates already saved inside stored rows seed the table once, at the
+  version 5 migration.
+- **Competition.** Up to 60 proposals is normal; more than 60 is a caveat; more than 150 is still relevant, but goes last of its own group.
 
 Telegram's "Como a IA pode ajudar" is chosen in this order: bug or error, then API or integration, then WordPress, then front-end, then
 automation.
+
+**Persistence (schema version 5).** `top_match` is a new accepted value of `opportunities.filter_decision`; SQLite cannot change a CHECK, so the table is
+rebuilt once, copying every row as it is (`first_seen_at`, `notified_at`, payloads, analyses and deliveries untouched), after the automatic
+`<name>.pre-v5.db` backup, which the program never deletes. Changing the rule version re-evaluates only the filter columns, offline.
 
 When the rule version changes, stored decisions are re-evaluated automatically (see below).
 
@@ -379,7 +397,7 @@ Version 3 adds `discovery_queue`, `deliveries`, `delivery_parts`, `quota_usage`,
 | `FREELANCER_MAX_PAGES`      | `5`                     | Freelancer.com listing pages (20 projects each) per run, 1 to 10 (else the run fails); no other source reads it |
 | `REMOTIVE_MIN_INTERVAL_HOURS` | `6`                   | Hours between Remotive queries, at least 6 (read only when `remotive` is enabled) |
 | `DRY_RUN`                   | `true`                  | `true`: print messages, send nothing, mark nothing. Only an explicit `false` sends |
-| `TELEGRAM_NOTIFY_DECISIONS` | `shortlist,review`      | Which decisions are notified                               |
+| `TELEGRAM_NOTIFY_DECISIONS` | `top_match,shortlist,review` | Which decisions are notified (`top_match`, `shortlist`, `review`); listing `shortlist` also includes `top_match` |
 | `MAX_TELEGRAM_ALERTS_PER_RUN` | `5`                   | Most alerts sent in one run, across all sources (positive integer) |
 | `AI_ENABLED`                | `false`                 | `true` turns AI analysis on (anything else keeps it off)   |
 | `AI_PROVIDER`               | `gemini`                | Only `gemini` exists; no automatic fallback                |

@@ -5,7 +5,7 @@ import { reevaluateOutdated } from '../pipeline/reevaluate.js';
 import { donBrunoProfile } from '../profile/don-bruno.js';
 import { OpportunityStore, type StoredOpportunity } from '../storage/opportunity-store.js';
 
-const GROUPS: readonly FilterDecision[] = ['shortlist', 'review', 'skip'];
+const GROUPS: readonly FilterDecision[] = ['top_match', 'shortlist', 'review', 'skip'];
 
 function main(): number {
   const config = loadAppConfig();

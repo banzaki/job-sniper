@@ -69,7 +69,7 @@ test('the header says why the message exists: a real new alert, an updated analy
 
 test('the classification follows the saved recommendation', () => {
   const open = makeOpportunity('10');
-  assert.match(render(open, makeAnalysis(open, { recommendation: 'apply' })).text, /<b>🟢 BOA OPORTUNIDADE<\/b>/);
+  assert.match(render(open, makeAnalysis(open, { recommendation: 'apply' })).text, /<b>🟢 OPORTUNIDADE COMPATÍVEL<\/b>/);
   assert.match(render(open, makeAnalysis(open, { recommendation: 'review' })).text, /<b>🟡 VALE REVISAR<\/b>/);
   const wait = makeOpportunity('11', { access: { kind: 'premium_only', publicAt: '2026-05-02T12:00:00.000Z', rawLabel: 'x' } });
   assert.match(render(wait, makeAnalysis(wait)).text, /<b>🕒 AGUARDAR LIBERAÇÃO<\/b>/);

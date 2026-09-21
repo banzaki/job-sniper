@@ -28,7 +28,7 @@ export function reevaluateOutdated(
     try {
       const stored = store.get(key);
       if (!stored) continue;
-      updates.push({ key, filter: evaluateOpportunity(stored.opportunity, profile, now) });
+      updates.push({ key, filter: evaluateOpportunity(stored.opportunity, profile, now, store.exchangeRates) });
       const previous = stored.filter.ruleVersion;
       report.previousVersions[previous] = (report.previousVersions[previous] ?? 0) + 1;
     } catch (error) {

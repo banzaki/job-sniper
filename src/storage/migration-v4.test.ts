@@ -47,7 +47,7 @@ test('upgrading a version-3 database adds only the source cache and leaves every
 
   assert.deepEqual(snapshot(path), before);
   const check = new DatabaseSync(path, { readOnly: true });
-  assert.equal(check.prepare('PRAGMA user_version').get()?.user_version, 4);
+  assert.equal(check.prepare('PRAGMA user_version').get()?.user_version, 5);
   const tables = check.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => String(row.name));
   assert.ok(tables.includes('source_cache'));
   check.close();
@@ -58,7 +58,7 @@ test('the upgrade leaves a backup of the version-3 file, untouched, and never ov
   createVersion3Database(path);
   new OpportunityStore(path).close();
 
-  const backup = join(workDir, 'v3b.pre-v4.db');
+  const backup = join(workDir, 'v3b.pre-v5.db');
   assert.ok(existsSync(backup));
   const copy = new DatabaseSync(backup, { readOnly: true });
   assert.equal(copy.prepare('PRAGMA user_version').get()?.user_version, 3, 'the backup is still version 3');

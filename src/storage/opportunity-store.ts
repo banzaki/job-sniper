@@ -12,6 +12,7 @@ import {
 import { ANALYSIS_SCHEMA, AnalysisStore } from './analysis-store.js';
 import { runInTransaction } from './db-util.js';
 import { DeliveryStore } from './delivery-store.js';
+import { ExchangeRateStore, SCHEMA_V5 } from './exchange-rate-store.js';
 import { QueueStore } from './queue-store.js';
 import { QuotaStore } from './quota-store.js';
 import { SCHEMA_V3 } from './schema-v3.js';
@@ -20,13 +21,14 @@ import { SourceCacheStore } from './source-cache-store.js';
 
 /**
  * 1: opportunities. 2: adds analyses and proposal_drafts. 3: adds the discovery queue, multi-part deliveries,
- * quota accounting and run locks. 4: adds the persistent source cache. Upgrades only add tables: existing rows are
- * never touched.
+ * quota accounting and run locks. 4: adds the persistent source cache. 5: adds `top_match` to the accepted filter
+ * decisions (the table is rebuilt because SQLite cannot change a CHECK) and the exchange-rate cache. Rows are copied
+ * as they are: nothing in them changes.
  */
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
-const SCHEMA = `
-CREATE TABLE IF NOT EXISTS opportunities (
+const opportunitiesTable = (name: string): string => `
+CREATE TABLE IF NOT EXISTS ${name} (
   id                          TEXT PRIMARY KEY,
   source_id                   TEXT NOT NULL,
   external_id                 TEXT NOT NULL,
@@ -36,7 +38,7 @@ CREATE TABLE IF NOT EXISTS opportunities (
   payload_json                TEXT NOT NULL,
   first_seen_at               TEXT NOT NULL,
   last_seen_at                TEXT NOT NULL,
-  filter_decision             TEXT NOT NULL CHECK (filter_decision IN ('shortlist', 'review', 'skip')),
+  filter_decision             TEXT NOT NULL CHECK (filter_decision IN ('top_match', 'shortlist', 'review', 'skip')),
   filter_reasons_json         TEXT NOT NULL,
   filter_keywords_json        TEXT NOT NULL,
   filter_evaluated_at         TEXT NOT NULL,
@@ -45,6 +47,11 @@ CREATE TABLE IF NOT EXISTS opportunities (
   UNIQUE (source_id, external_id)
 );
 `;
+
+const SCHEMA = opportunitiesTable('opportunities');
+const OPPORTUNITY_COLUMNS =
+  'id, source_id, external_id, title, url, status, payload_json, first_seen_at, last_seen_at, filter_decision, ' +
+  'filter_reasons_json, filter_keywords_json, filter_evaluated_at, filter_rule_version, notified_at';
 
 /** The stored data could not be read back (corrupted or unexpected content). */
 export class StoreDataError extends Error {
@@ -82,6 +89,8 @@ export class OpportunityStore {
   readonly quota: QuotaStore;
   /** Last response and attempt clock of sources that publish a whole feed at once. */
   readonly sourceCache: SourceCacheStore;
+  /** The newest exchange rate to USD each source published per currency (never used to change a stored budget). */
+  readonly exchangeRates: ExchangeRateStore;
 
   /** Opens (creating the folder and file when missing) the database at `path`. */
   constructor(path: string) {
@@ -96,6 +105,7 @@ export class OpportunityStore {
       this.deliveries = new DeliveryStore(this.db);
       this.quota = new QuotaStore(this.db);
       this.sourceCache = new SourceCacheStore(this.db);
+      this.exchangeRates = new ExchangeRateStore(this.db);
       this.hasStatement = this.db.prepare(
         'SELECT 1 AS present FROM opportunities WHERE source_id = ? AND external_id = ?',
       );
@@ -162,6 +172,19 @@ export class OpportunityStore {
       filter.evaluatedAt,
       filter.ruleVersion,
     );
+  }
+
+  /**
+   * A database created before version 5 only accepts three filter decisions. SQLite cannot change a CHECK, so the table
+   * is rebuilt with every row copied column by column (nothing is recomputed). Runs inside the migration transaction.
+   */
+  private allowTopMatch(): void {
+    const row = this.db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'opportunities'").get();
+    if (typeof row?.sql !== 'string' || row.sql.includes("'top_match'")) return;
+    this.db.exec('ALTER TABLE opportunities RENAME TO opportunities_before_v5');
+    this.db.exec(opportunitiesTable('opportunities'));
+    this.db.exec(`INSERT INTO opportunities (${OPPORTUNITY_COLUMNS}) SELECT ${OPPORTUNITY_COLUMNS} FROM opportunities_before_v5`);
+    this.db.exec('DROP TABLE opportunities_before_v5');
   }
 
   /** Runs `work` in one transaction (all-or-nothing). Not re-entrant. */
@@ -327,7 +350,13 @@ export class OpportunityStore {
       this.db.exec(ANALYSIS_SCHEMA);
       this.db.exec(SCHEMA_V3);
       this.db.exec(SCHEMA_V4);
+      this.db.exec(SCHEMA_V5);
+      this.allowTopMatch();
     });
+    if (version < SCHEMA_VERSION) {
+      // Local and offline: the rates already stored inside opportunities, each dated by its own collection time.
+      new ExchangeRateStore(this.db).seedFromOpportunities();
+    }
     if (version < SCHEMA_VERSION) {
       this.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
     }

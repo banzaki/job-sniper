@@ -56,9 +56,9 @@ test('shortlist comes before review, whatever the other criteria say', () => {
   assert.deepEqual(order([{ id: 'r', decision: 'review', proposals: 0, strong: ['HTML', 'CSS', 'React'] }, { id: 's', decision: 'shortlist', proposals: 200, published: '2026-04-01T00:00:00Z' }]), ['fake:s', 'fake:r']);
 });
 
-test('the crowding tier: up to 20 proposals first, then 21-60, then 61-150', () => {
+test('the crowding tier: up to 20, 21-60, 61-150 and more than 150; recency comes before it in the order', () => {
   const tiers = (n: number) => competitionTier(make({ id: 'x', sourceId: 'freelancer', proposals: n }).opportunity);
-  assert.deepEqual([0, 20, 21, 60, 61, 150].map(tiers), [0, 0, 1, 1, 2, 2]);
+  assert.deepEqual([0, 20, 21, 60, 61, 150, 151, 400].map(tiers), [0, 0, 1, 1, 2, 2, 3, 3]);
   assert.equal(competitionTier(make({ id: 'x', sourceId: 'freelancer', proposals: null }).opportunity), 1, 'unknown is normal');
   assert.equal(competitionTier(make({ id: 'x', sourceId: '99freelas', proposals: 5, marketplace: false }).opportunity), 1, 'a source without engagement types has no tier');
   assert.deepEqual(
@@ -67,7 +67,8 @@ test('the crowding tier: up to 20 proposals first, then 21-60, then 61-150', () 
       { id: 'normal', sourceId: 'freelancer', proposals: 40 },
       { id: 'high', sourceId: 'freelancer', proposals: 8, published: '2026-04-29T09:00:00Z' },
     ]),
-    ['freelancer:high', 'freelancer:normal', 'freelancer:reduced'],
+    // Same day for the first two, so fewer proposals decide; the older project comes after (recency outranks the tier).
+    ['freelancer:normal', 'freelancer:reduced', 'freelancer:high'],
   );
 });
 
@@ -86,7 +87,7 @@ test('then the most recent day first (Brasília calendar day), unknown dates las
   assert.equal(publicationDay(make({ id: 'b', published: null }).opportunity), '');
 });
 
-test('within the same day: more strong skills first, then fewer proposals, then the stable id', () => {
+test('within the same day: fewer proposals, then more strong skills, then the stable id', () => {
   assert.deepEqual(order([{ id: 'one', strong: ['HTML'] }, { id: 'three', strong: ['HTML', 'CSS', 'React'] }, { id: 'two', strong: ['HTML', 'CSS'] }]), ['fake:three', 'fake:two', 'fake:one']);
   assert.deepEqual(order([{ id: 'many', proposals: 80 }, { id: 'few', proposals: 25 }, { id: 'none-known', proposals: null }]), ['fake:few', 'fake:many', 'fake:none-known']);
   assert.deepEqual(order([{ id: 'b' }, { id: 'c' }, { id: 'a' }]), ['fake:a', 'fake:b', 'fake:c'], 'identical criteria: by id');
@@ -115,13 +116,17 @@ const project = (over: Partial<Opportunity> = {}): Opportunity =>
   });
 const decide = (opportunity: Opportunity) => evaluateOpportunity(opportunity, donBrunoProfile, NOW);
 
-test('competition never removes a relevant project: more than 60 proposals is a review, more than 150 a review with the lowest priority', () => {
+test('competition never removes or caps a compatible project: it is a caveat, and above 150 the lowest priority of its group', () => {
   assert.equal(decide(project({ proposalCount: 60 })).decision, 'shortlist');
-  assert.equal(decide(project({ proposalCount: 150 })).decision, 'review', '61 to 150 is crowded: at most a review');
+  for (const proposals of [61, 150]) {
+    const crowded = decide(project({ proposalCount: proposals }));
+    assert.equal(crowded.decision, 'shortlist', 'still green');
+    assert.ok(crowded.reasons.includes(`crowded project (${proposals} proposals): lowers the ranking`));
+  }
   for (const proposals of [151, 400]) {
     const crowded = decide(project({ proposalCount: proposals }));
-    assert.equal(crowded.decision, 'review', 'still relevant, not a skip');
-    assert.ok(crowded.reasons.includes(`very crowded project (${proposals} proposals): at most a review, lowest priority`));
+    assert.equal(crowded.decision, 'shortlist', 'still relevant, not a skip and not yellow');
+    assert.ok(crowded.reasons.includes(`very crowded project (${proposals} proposals): lowest priority in its group`));
   }
   assert.equal(decide(project({ proposalCount: null })).decision, 'shortlist', 'unknown is not crowded');
   assert.equal(decide(project({ proposalCount: 400, title: 'x', description: 'no skills at all' })).decision, 'skip', 'an irrelevant project is still a skip');
@@ -248,25 +253,52 @@ test('a very crowded Freelancer project stays available as a review, but is owed
   assert.deepEqual(ranked, ['12', '11'], 'even though it is newer, it goes last');
 });
 
-test('review ranking: a better budget first, then less competition; a very crowded review last; shortlist always first', () => {
-  const reviewWith = (id: string, reason: string | null, over: Partial<Spec> = {}) => {
-    const entry = make({ id, sourceId: 'freelancer', decision: 'review', ...over });
-    if (reason) entry.filter.reasons.push(reason);
-    return entry;
-  };
-  const reaches = reviewWith('reaches', null, { proposals: 55 });
-  const crosses = reviewWith('crosses', 'fixed budget range of about US$30 to 250 crosses the US$50 floor: at most a review', { proposals: 10 });
-  const noRate = reviewWith('no-rate', 'budget currency "INR" has no reliable USD conversion', { proposals: 10 });
-  const low = reviewWith('low', 'fixed budget of about US$40 is below the US$50 floor for a shortlist', { proposals: 10 });
-  const swamped = reviewWith('swamped', null, { proposals: 400 });
-  const green = make({ id: 'green', sourceId: 'freelancer', decision: 'shortlist', proposals: 100 });
-  assert.deepEqual(
-    [low, swamped, noRate, crosses, reaches, green].sort(compareForAlert).map((entry) => entry.opportunity.externalId),
-    ['green', 'reaches', 'crosses', 'no-rate', 'low', 'swamped'],
-  );
-  assert.deepEqual([0, 20, 21, 60, 61, 150, 151, 400].map((n) => competitionTier(make({ id: 'x', sourceId: 'freelancer', proposals: n }).opportunity)), [0, 0, 1, 1, 2, 2, 3, 3]);
-  assert.equal(budgetRank(low.filter), 3);
-  assert.equal(budgetRank(green.filter), 0);
+const CROSSES = 'fixed budget range of about US$ 30–250 crosses the US$ 50 floor';
+const LOW = 'fixed budget of about US$ 40 is below the US$ 50 floor';
+const NO_RATE = 'budget currency "INR" has no fresh USD conversion: not a top match';
+const ranked = (entries: { opportunity: Opportunity; filter: FilterResult }[]): string[] => [...entries].sort(compareForAlert).map((entry) => entry.opportunity.externalId);
+const withReasons = (id: string, decision: FilterResult['decision'], extra: string[] = [], over: Partial<Spec> = {}) => {
+  const entry = make({ id, sourceId: 'freelancer', decision, ...over });
+  entry.filter.reasons.push(...extra);
+  return entry;
+};
+
+test('the global order is top match, then shortlist, then review, whatever the other criteria say', () => {
+  const top = withReasons('top', 'top_match', [], { proposals: 60, published: '2026-04-01T00:00:00Z' });
+  const green = withReasons('green', 'shortlist', [], { proposals: 5, published: '2026-05-01T12:00:00Z', strong: ['HTML', 'CSS', 'React'] });
+  const yellow = withReasons('yellow', 'review', [], { proposals: 0, published: '2026-05-01T12:00:00Z', strong: ['HTML', 'CSS', 'React'] });
+  assert.deepEqual(ranked([yellow, green, top]), ['top', 'green', 'yellow']);
+});
+
+test('inside a group: not very crowded, a clear main task, recency, fewer caveats, budget, fewer proposals, strong skills, id', () => {
+  // 1. more than 150 proposals goes last of its own group, however new and cheap-free it is.
+  assert.deepEqual(ranked([withReasons('swamped', 'review', [], { proposals: 400, published: '2026-05-01T12:00:00Z' }), withReasons('old', 'review', [], { proposals: 40, published: '2026-04-01T12:00:00Z' })]), ['old', 'swamped']);
+  // 2. a clearly relevant main task before one with a doubt, even when the doubtful one is newer.
+  const doubt = withReasons('doubt', 'review', ['technical deliverable is not clear in the title or the start of the description'], { published: '2026-05-01T12:00:00Z' });
+  const clear = withReasons('clear', 'review', [], { published: '2026-04-20T12:00:00Z' });
+  assert.deepEqual(ranked([doubt, clear]), ['clear', 'doubt']);
+  // 3. the most recent day first.
+  assert.deepEqual(ranked([withReasons('a-old', 'review', [], { published: '2026-04-20T12:00:00Z' }), withReasons('z-new', 'review', [], { published: '2026-05-01T12:00:00Z' })]), ['z-new', 'a-old']);
+  // 4. fewer caveats first (same day).
+  const two = withReasons('two', 'shortlist', [CROSSES, 'crowded project (80 proposals): lowers the ranking'], { proposals: 80 });
+  const one = withReasons('one', 'shortlist', ['crowded project (80 proposals): lowers the ranking'], { proposals: 80 });
+  const none = withReasons('none', 'shortlist', [], { proposals: 80 });
+  assert.deepEqual(ranked([two, one, none]), ['none', 'one', 'two']);
+  // 5. the better budget (same day, same caveat count): reaches < crosses < no fresh conversion < below the floor.
+  const reaches = withReasons('reaches', 'shortlist');
+  const noRate = withReasons('no-rate', 'shortlist', [NO_RATE]);
+  const low = withReasons('low', 'shortlist', [LOW]);
+  assert.deepEqual(ranked([low, noRate, reaches]), ['reaches', 'no-rate', 'low'], 'a missing conversion is not a caveat, a low budget is');
+  assert.deepEqual([budgetRank(reaches.filter), budgetRank(noRate.filter), budgetRank(withReasons('c', 'shortlist', [CROSSES]).filter), budgetRank(low.filter)], [0, 2, 1, 3]);
+  // 6. fewer proposals, 7. more strong skills, 8. the id.
+  assert.deepEqual(ranked([withReasons('many', 'review', [], { proposals: 50 }), withReasons('few', 'review', [], { proposals: 10 })]), ['few', 'many']);
+  assert.deepEqual(ranked([withReasons('one-skill', 'review', [], { strong: ['HTML'] }), withReasons('two-skills', 'review', [], { strong: ['HTML', 'CSS'] })]), ['two-skills', 'one-skill']);
+  assert.deepEqual(ranked([withReasons('b', 'review'), withReasons('a', 'review')]), ['a', 'b']);
+});
+
+test('the order of the same criteria does not depend on the input order, with top match in the mix', () => {
+  const specs = Array.from({ length: 16 }, (_, i) => withReasons(String(i), (['top_match', 'shortlist', 'review'] as const)[i % 3]!, i % 4 === 0 ? [LOW] : [], { proposals: (i * 53) % 260, published: `2026-04-${String(20 + (i % 9)).padStart(2, '0')}T12:00:00Z`, strong: ['HTML', 'CSS', 'React'].slice(0, (i % 3) + 1) }));
+  assert.deepEqual(ranked(specs), ranked([...specs].reverse()));
 });
 
 // ---------- configuration ----------

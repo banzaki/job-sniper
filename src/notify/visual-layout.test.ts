@@ -140,9 +140,10 @@ const projectOpportunity = (over: Partial<Opportunity> = {}): Opportunity =>
     ...over,
   });
 
-test('the classification of a basic alert: shortlist is BOA OPORTUNIDADE, review is VALE REVISAR', () => {
+test('the classification of a basic alert: top match is MATCH EXCELENTE, shortlist is OPORTUNIDADE COMPATÍVEL, review is VALE REVISAR', () => {
   const opportunity = projectOpportunity();
-  assert.ok(formatOpportunityMessage(opportunity, filter('shortlist'), { now: NOW }).includes('<b>🟢 BOA OPORTUNIDADE</b>'));
+  assert.ok(formatOpportunityMessage(opportunity, filter('top_match'), { now: NOW }).includes('<b>🔵 MATCH EXCELENTE</b>'));
+  assert.ok(formatOpportunityMessage(opportunity, filter('shortlist'), { now: NOW }).includes('<b>🟢 OPORTUNIDADE COMPATÍVEL</b>'));
   assert.ok(formatOpportunityMessage(opportunity, filter('review'), { now: NOW }).includes('<b>🟡 VALE REVISAR</b>'));
 });
 
@@ -162,7 +163,7 @@ test('blocks are separated by blank lines, the message stays compact, and the ef
   const blocks = text.split('\n\n');
   assert.deepEqual(blocks.map((block) => block.split('\n')[0]), [
     '<b>🚨 NOVA OPORTUNIDADE</b>',
-    '<b>🟢 BOA OPORTUNIDADE</b>',
+    '<b>🟢 OPORTUNIDADE COMPATÍVEL</b>',
     '<b>Landing page em HTML e CSS</b>',
     '💰 Orçamento: R$ 800–1.200',
     '<b>📝 O projeto</b>',
@@ -199,7 +200,11 @@ test('Atenção holds ONE caveat, by priority: restricted access, language, adva
   assert.match(basicAttention(restricted, filter('review', reasons), NOW)!, /^Acesso restrito na última consulta\. Liberação estimada: 02\/05 às 16h37 \(Brasília\); confirmar no site\.$/);
   assert.equal(basicAttention(marketplace(100), filter('review', reasons), NOW), 'Idioma do projeto ("de") fora dos idiomas do perfil.');
   assert.equal(basicAttention(marketplace(100), filter('review', reasons.slice(1)), NOW), 'Escopo conflitante ou avançado: LLM.');
-  assert.equal(basicAttention(marketplace(100), filter('review', ['seniority in the title: senior']), NOW), 'Concorrência alta: 100 propostas já enviadas.');
+  // Crowding is only a warning when nothing more relevant (a real doubt about the work) came first.
+  const crowded = 'crowded project (100 proposals): lowers the ranking';
+  assert.equal(basicAttention(marketplace(100), filter('shortlist', [crowded]), NOW), 'Concorrência alta: 100 propostas já enviadas.');
+  assert.equal(basicAttention(marketplace(300), filter('shortlist', ['very crowded project (300 proposals): lowest priority in its group']), NOW), 'Concorrência muito alta: 300 propostas já enviadas.');
+  assert.equal(basicAttention(marketplace(100), filter('review', ['seniority in the title: senior', crowded]), NOW), 'Senioridade no título: senior.');
   assert.equal(basicAttention(marketplace(30), filter('review', ['seniority in the title: senior']), NOW), 'Senioridade no título: senior.');
   assert.equal(basicAttention(marketplace(30), filter('shortlist', ['strong signals: HTML']), NOW), null, 'nothing to warn about');
   assert.equal(basicAttention(projectOpportunity({ proposalCount: 100 }), filter('shortlist', ['strong signals: HTML']), NOW), null, 'a source with no engagement type has no competition scale');
@@ -207,7 +212,7 @@ test('Atenção holds ONE caveat, by priority: restricted access, language, adva
 
 test('a message carries a single Atenção block, or none', () => {
   const opportunity = projectOpportunity({ employmentType: 'freelance', proposalCount: 100 });
-  const withCaveat = formatOpportunityMessage(opportunity, filter('review', ['strong signals: HTML', 'seniority in the title: senior']), { now: NOW });
+  const withCaveat = formatOpportunityMessage(opportunity, filter('shortlist', ['strong signals: HTML', 'crowded project (100 proposals): lowers the ranking']), { now: NOW });
   assert.equal((withCaveat.match(/⚠️ Atenção/g) ?? []).length, 1);
   assert.ok(withCaveat.includes('<b>⚠️ Atenção</b>\nConcorrência alta: 100 propostas já enviadas.'));
   assert.ok(!formatOpportunityMessage(projectOpportunity({ employmentType: 'freelance', proposalCount: 12 }), filter('shortlist'), { now: NOW }).includes('Atenção'));

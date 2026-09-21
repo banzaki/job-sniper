@@ -1,4 +1,32 @@
-import { normalizeText } from '../text.js';
+import type { TransactionalVocabulary } from '../profile/interest-profile.js';
+import { normalizeText, padWords } from '../text.js';
+import { findTerms } from './keyword-match.js';
+
+/** How much of the description counts as "the start": where a project states what it needs delivered. */
+export const DESCRIPTION_LEAD_LENGTH = 500;
+
+
+/**
+ * Is the MAIN delivery transactional (payments, checkout, subscriptions, ticketing or bookings)? Only then it is an
+ * advanced scope for a small project. A shop that merely says customers pay with PayPal is not: a payment word counts
+ * when it is in the title, when the start of the description names a strongly transactional delivery, or when it
+ * directly follows an implementing verb ("integrate a payment gateway", "fix the billing"). Returns the term that
+ * proves it, or null.
+ */
+export function transactionalCentral(title: string, description: string, vocabulary: TransactionalVocabulary | undefined): string | null {
+  if (!vocabulary) return null;
+  const paddedTitle = padWords(normalizeText(title));
+  const lead = normalizeText(description.slice(0, DESCRIPTION_LEAD_LENGTH));
+  const inTitle = findTerms(paddedTitle, vocabulary.titleTerms)[0];
+  if (inTitle) return inTitle;
+  const central = findTerms(padWords(lead), vocabulary.central)[0];
+  if (central) return central;
+  const objects = vocabulary.objects.flatMap((rule) => [rule.term, ...(rule.aliases ?? [])]).map(normalizeText);
+  const actions = vocabulary.actions.map(normalizeText);
+  if (objects.length === 0 || actions.length === 0) return null;
+  const implementing = new RegExp(`\\b(?:${actions.join('|')})\\w*(?:\\s+\\w+){0,4}?\\s+(${objects.join('|')})\\b`).exec(lead);
+  return implementing?.[1] ?? null;
+}
 
 /** A deadline of this many hours or less is extremely short for a real project. */
 export const VERY_SHORT_DEADLINE_HOURS = 24;

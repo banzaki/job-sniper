@@ -15,7 +15,7 @@ const KIND_HEADER: Record<AlertKind, string> = {
 
 export interface AlertParts {
   kind: AlertKind;
-  /** For example "🟢 BOA OPORTUNIDADE". A fixed label, never external text. */
+  /** For example "🟢 OPORTUNIDADE COMPATÍVEL". A fixed label, never external text. */
   classification: string;
   title: string;
   source: string;

@@ -6,12 +6,14 @@ import { formatBrasiliaTime } from './layout.js';
 import { translateReason } from './translate-reasons.js';
 
 export const LOW_BUDGET_TEXT = 'Orçamento baixo para o escopo; avalie se compensa pelo portfólio, avaliação ou experiência.';
-/** The stored reason of a budget below the floor for a shortlist (the USD equivalent is never shown in the message). */
-const BELOW_FLOOR = / is below the US\$\d+(\/h)? floor for a shortlist$/;
+/** The stored reason of a budget below the floor (the USD equivalent is never shown in this message). */
+const BELOW_FLOOR = / is below the US\$ \d+(\/h)? floor$/;
+const CROWDED = /^(very )?crowded project/;
 
-/** The classification of an alert that comes from the deterministic filter alone. */
+/** The commercial ladder of an alert that comes from the deterministic filter alone. */
 export const CLASSIFICATION: Record<FilterDecision, string> = {
-  shortlist: '🟢 BOA OPORTUNIDADE',
+  top_match: '🔵 MATCH EXCELENTE',
+  shortlist: '🟢 OPORTUNIDADE COMPATÍVEL',
   review: '🟡 VALE REVISAR',
   skip: '⚪ DESCARTADA',
 };
@@ -23,6 +25,7 @@ export const CLASSIFICATION: Record<FilterDecision, string> = {
  */
 export function compatibilityLabel(filter: FilterResult): 'alta' | 'média' | 'baixa' {
   const strong = strongSignalCount(filter);
+  if (filter.decision === 'top_match') return 'alta';
   if (filter.decision === 'shortlist') return strong >= 2 ? 'alta' : 'média';
   return strong >= 1 ? 'média' : 'baixa';
 }
@@ -55,7 +58,8 @@ export function basicAttention(opportunity: Opportunity, filter: FilterResult, n
   const caveat = mainCaveat(filter.reasons);
   // A low budget is the main worry when it is the first caveat: it says what to weigh, not that the project is bad.
   if (caveat !== null && BELOW_FLOOR.test(caveat)) return LOW_BUDGET_TEXT;
-  if (opportunity.proposalCount !== null && opportunity.employmentType !== undefined) {
+  // Crowding is a warning only when nothing more relevant (a real doubt, a low budget) came first.
+  if ((caveat === null || CROWDED.test(caveat)) && opportunity.proposalCount !== null && opportunity.employmentType !== undefined) {
     const tier = competitionTier(opportunity);
     if (tier === 3) return `Concorrência muito alta: ${opportunity.proposalCount} propostas já enviadas.`;
     if (tier === 2) return `Concorrência alta: ${opportunity.proposalCount} propostas já enviadas.`;

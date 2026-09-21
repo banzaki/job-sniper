@@ -7,6 +7,18 @@ export interface KeywordRule {
   except?: readonly string[];
 }
 
+/** Words that make a delivery transactional, matched in the title and in the start of the description. */
+export interface TransactionalVocabulary {
+  /** In the title, the delivery itself is about payments, checkout, ticketing or bookings. */
+  titleTerms: readonly KeywordRule[];
+  /** In the start of the description, a strongly transactional delivery (recurring billing, multiple gateways...). */
+  central: readonly KeywordRule[];
+  /** Payment objects that count only right after an implementing verb (`actions`). */
+  objects: readonly KeywordRule[];
+  /** Verb stems that mean implementing or repairing something ("integrat" matches integrate, integration...). */
+  actions: readonly string[];
+}
+
 /** What a person is interested in, independent of any platform. */
 export interface InterestProfile {
   name: string;
@@ -34,10 +46,20 @@ export interface InterestProfile {
   /** Words that name a main task that is not technology (payroll, story writing, trading...), whatever skills are tagged. */
   offTopicTasks?: readonly KeywordRule[];
   /**
-   * USD equivalents a budget must reach for a SHORTLIST: a fixed price, and an hourly rate. A lower budget never removes an
-   * opportunity, it only limits it to a review and lowers its priority. Omit to judge no budget.
+   * USD equivalents a budget must fully reach for a TOP MATCH: a fixed price, and an hourly rate. A lower budget never
+   * removes an opportunity and does not cap it: it is a caveat that lowers its ranking. Omit to judge no budget.
    */
   budgetFloors?: { fixedUsd: number; hourlyUsd: number };
-  /** Payments and checkout work: a transactional scope is riskier for a small project, so it is at most a review. */
-  transactionalScope?: readonly KeywordRule[];
+  /** When the MAIN delivery is transactional (payments, checkout, subscriptions, ticketing) it is an advanced scope: a review. */
+  transactionalScope?: TransactionalVocabulary;
+  /**
+   * Skills the profile explicitly does not offer (another language, native mobile, games, machine learning...). When one is
+   * the CENTRAL skill of the work (the title, or the start of the description with no available skill named) it is a skip;
+   * beside an available skill it is a doubt (review).
+   */
+  unavailableSkills?: readonly KeywordRule[];
+  /** Marketing tasks (ads, SEO): not technology even beside a site word, unless the title names a strong skill. */
+  offTopicUnlessStrong?: readonly KeywordRule[];
+  /** Signs of a large scope (enterprise, marketplace, SaaS...): never a "top match", but not a doubt by themselves. */
+  largeScopeSignals?: readonly KeywordRule[];
 }

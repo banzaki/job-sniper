@@ -71,7 +71,7 @@ test('upgrading a version-2 database keeps every opportunity, analysis, proposal
 
   assert.deepEqual(snapshot(path), before, 'no existing row changed');
   const check = new DatabaseSync(path, { readOnly: true });
-  assert.equal(check.prepare('PRAGMA user_version').get()?.user_version, 4);
+  assert.equal(check.prepare('PRAGMA user_version').get()?.user_version, 5);
   check.close();
 });
 
@@ -81,7 +81,7 @@ test('the upgrade leaves a local backup of the version-2 file, which stays untou
   const before = snapshot(path);
   new OpportunityStore(path).close();
 
-  const backup = join(workDir, 'backup-v2.pre-v4.db');
+  const backup = join(workDir, 'backup-v2.pre-v5.db');
   assert.ok(existsSync(backup), 'the backup name ends in .db, which the .gitignore covers');
   assert.deepEqual(snapshot(backup), before);
   const copy = new DatabaseSync(backup, { readOnly: true });
@@ -103,7 +103,7 @@ test('the migration can be repeated and never overwrites the first backup', () =
     assert.equal(again.queue.counts().pending, 1, 'work added after the upgrade survives reopening');
     again.close();
   }
-  const backup = new DatabaseSync(join(workDir, 'repeat.pre-v4.db'), { readOnly: true });
+  const backup = new DatabaseSync(join(workDir, 'repeat.pre-v5.db'), { readOnly: true });
   assert.equal(backup.prepare('PRAGMA user_version').get()?.user_version, 2);
   backup.close();
 });

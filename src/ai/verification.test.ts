@@ -164,7 +164,7 @@ test('messages state that unverified competence needs review before applying', (
   assert.match(unverified.text, /<b>🟡 VALE REVISAR<\/b>/);
   assert.match(unverified.text, /Competências essenciais ainda não verificadas: HTML, CSS, landing pages/);
   const verified = renderAnalysisMessage({ opportunity, analysis: makeAnalysis(opportunity), mode: 'enriched', now: NOW });
-  assert.match(verified.text, /<b>🟢 BOA OPORTUNIDADE<\/b>/);
+  assert.match(verified.text, /<b>🟢 OPORTUNIDADE COMPATÍVEL<\/b>/);
   assert.match(verified.text, /Escopo pouco detalhado/);
   assert.ok(!/não verificadas/.test(verified.text), 'a fully verified analysis shows no competence caveat');
 });

@@ -41,9 +41,9 @@ export const MIN_FREELANCER_MAX_PAGES = 1;
 export const MAX_FREELANCER_MAX_PAGES = 10;
 /** Alerts per run: a small, ranked batch instead of a flood. */
 export const DEFAULT_MAX_TELEGRAM_ALERTS_PER_RUN = 5;
-export const DEFAULT_NOTIFY_DECISIONS: readonly FilterDecision[] = ['shortlist', 'review'];
+export const DEFAULT_NOTIFY_DECISIONS: readonly FilterDecision[] = ['top_match', 'shortlist', 'review'];
 
-const DECISIONS: readonly FilterDecision[] = ['shortlist', 'review', 'skip'];
+const DECISIONS: readonly FilterDecision[] = ['top_match', 'shortlist', 'review', 'skip'];
 
 /** Missing or unusable configuration. Messages name variables, never their values. */
 export class ConfigError extends Error {
@@ -267,5 +267,8 @@ function parseDecisions(
       warn(`Ignoring unknown decision "${item}" in TELEGRAM_NOTIFY_DECISIONS.`);
     }
   }
+  // Compatibility: whoever asked for `shortlist` before `top_match` existed also receives it (an excellent match is a
+  // better shortlist). Only an explicit list without `shortlist` can leave it out.
+  if (decisions.includes('shortlist') && !decisions.includes('top_match')) decisions.unshift('top_match');
   return decisions.length > 0 ? decisions : [...DEFAULT_NOTIFY_DECISIONS];
 }

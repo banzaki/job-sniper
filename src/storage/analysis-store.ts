@@ -139,7 +139,7 @@ export class AnalysisStore {
    * (allowed even for a basic-filter skip, to review a discard on purpose).
    *
    * Automatic selection (no `only`) is prioritized:
-   *  1. only basic-filter "shortlist" and "review" (a basic skip stays stored, outside automatic analysis; it is
+   *  1. only basic-filter "top_match", "shortlist" and "review" (a basic skip stays stored, outside automatic analysis; it is
    *     unrelated to the AI's own "skip" conclusion);
    *  2. opportunities never attempted before those that failed earlier, and none that already failed
    *     MAX_ANALYSIS_ATTEMPTS times (so the same rejections cannot monopolize batches; they stay visible as failed);
@@ -157,7 +157,7 @@ export class AnalysisStore {
       conditions.push('o.source_id = ? AND o.external_id = ?');
       params.push(options.only.sourceId, options.only.externalId);
     } else {
-      conditions.push(`o.filter_decision IN ('shortlist', 'review')`);
+      conditions.push(`o.filter_decision IN ('top_match', 'shortlist', 'review')`);
       if (options.sourceIds) {
         // Only "?" placeholders are generated; the ids are bound as parameters.
         conditions.push(`o.source_id IN (${options.sourceIds.map(() => '?').join(', ') || 'NULL'})`);
@@ -190,7 +190,7 @@ export class AnalysisStore {
       const keywords = JSON.parse(text(row, 'filter_keywords_json')) as unknown;
       const hasKeywords = Array.isArray(keywords) && keywords.length > 0;
       const attempted = row.analysis_status === 'failed' ? 1 : 0;
-      const tier = decision === 'shortlist' ? 0 : decision === 'review' ? 1 : 2;
+      const tier = decision === 'top_match' || decision === 'shortlist' ? 0 : decision === 'review' ? 1 : 2;
       return {
         key: { sourceId: text(row, 'source_id'), externalId: text(row, 'external_id') },
         group: `${attempted}${tier}${hasKeywords ? 0 : 1}`,

@@ -1,5 +1,6 @@
 import type { FilterDecision, FilterResult } from '../domain/filter-result.js';
 import type { Opportunity, OpportunityKey } from '../domain/opportunity.js';
+import { ownRate } from '../filter/budget.js';
 import { evaluateOpportunity } from '../filter/opportunity-filter.js';
 import type { InterestProfile } from '../profile/interest-profile.js';
 import type { ListingPage, OpportunitySource } from '../sources/opportunity-source.js';
@@ -105,7 +106,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRep
     detailsFailed: 0,
     detailsUnavailable: 0,
     queue: { pending: 0, done: 0, unavailable: 0 },
-    decisions: { shortlist: 0, review: 0, skip: 0 },
+    decisions: { top_match: 0, shortlist: 0, review: 0, skip: 0 },
     failures: [],
     stopReason: 'source-exhausted',
     stopDetail: null,
@@ -225,7 +226,10 @@ async function fetchDetails(context: {
     const at = context.now().toISOString();
     try {
       const opportunity = await source.fetchDetail(row.key.externalId);
-      const filter = evaluateOpportunity(opportunity, profile, context.now());
+      // The rate the source just published is kept per source and currency, so older rows can be converted from it.
+      const observed = ownRate(opportunity);
+      if (observed) store.exchangeRates.record(opportunity.sourceId, observed.currency, observed.rateToUsd, observed.observedAt);
+      const filter = evaluateOpportunity(opportunity, profile, context.now(), store.exchangeRates);
       store.persistDetail(opportunity, filter, at);
       report.detailsObtained += 1;
       report.decisions[filter.decision] += 1;
