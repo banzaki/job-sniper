@@ -50,6 +50,27 @@ const RULES: { pattern: RegExp; render: (match: RegExpExecArray) => string }[] =
     pattern: /^strong skills appear only as tags, not in the title or description$/,
     render: () => 'as habilidades aparecem só como tags, não no título nem na descrição',
   },
+  { pattern: /^crowded project \((\d+) proposals\): at most a review$/, render: (m) => `concorrência alta (${m[1]} propostas): no máximo revisar` },
+  {
+    pattern: /^main task is not technical: "(.+)" in the title and no technical deliverable in the title or the start of the description$/,
+    render: (m) => `a tarefa principal não é técnica: "${m[1]}" no título e nenhuma entrega técnica no título nem no início da descrição`,
+  },
+  {
+    pattern: /^main task is not technical: "(.+)" at the start of the description and no technical deliverable in the title or there$/,
+    render: (m) => `a tarefa principal não é técnica: "${m[1]}" no início da descrição e nenhuma entrega técnica`,
+  },
+  {
+    pattern: /^title names non-technical work \("(.+)"\) but the description starts with a technical deliverable$/,
+    render: (m) => `o título indica trabalho não técnico ("${m[1]}"), mas a descrição começa com uma entrega técnica`,
+  },
+  {
+    pattern: /^technical deliverable is not clear in the title or the start of the description$/,
+    render: () => 'a entrega técnica não está clara no título nem no início da descrição',
+  },
+  { pattern: /^fixed budget of about US\$([\d.]+) is below the US\$(\d+) floor$/, render: (m) => `orçamento fixo de cerca de US$${m[1]} abaixo do mínimo de US$${m[2]}` },
+  { pattern: /^hourly rate of about US\$([\d.]+)\/h is below the US\$(\d+)\/h floor$/, render: (m) => `valor por hora de cerca de US$${m[1]}/h abaixo do mínimo de US$${m[2]}/h` },
+  { pattern: /^budget currency "(.+)" has no reliable USD conversion$/, render: (m) => `moeda do orçamento (${m[1]}) sem conversão confiável para dólar` },
+  { pattern: /^budget currency not stated: no reliable USD conversion$/, render: () => 'moeda do orçamento não informada' },
   { pattern: /^too many proposals \((\d+)\) for an automatic alert$/, render: (m) => `propostas demais (${m[1]}) para alerta automático` },
   { pattern: /^project language "(.+)" is not one of the profile languages$/, render: (m) => `idioma do projeto ("${m[1]}") fora dos idiomas do perfil` },
   { pattern: /^employment type not stated$/, render: () => 'tipo de contratação não informado' },

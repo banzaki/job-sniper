@@ -2,8 +2,13 @@ import type { FilterResult } from '../domain/filter-result.js';
 import type { EmploymentType, Opportunity } from '../domain/opportunity.js';
 import type { InterestProfile } from '../profile/interest-profile.js';
 import { normalizeText, padWords } from '../text.js';
+import { budgetInUsd, formatUsd } from './budget.js';
+import { findTerms } from './keyword-match.js';
 import { classifyLocation, descriptionRestrictsLocation } from './location.js';
-import { MAX_PROPOSALS_FOR_ALERT } from './ranking.js';
+import { MAX_PROPOSALS_FOR_ALERT, MAX_PROPOSALS_FOR_SHORTLIST } from './ranking.js';
+
+/** How much of the description counts as "the start": where a project states what it needs delivered. */
+const DESCRIPTION_LEAD_LENGTH = 500;
 
 const TYPE_LABEL: Record<EmploymentType, string> = {
   freelance: 'freelance',
@@ -42,6 +47,12 @@ const TEAM_ROLE: readonly RegExp[] = [
  *  - location ambiguous, missing, or restricted in the description -> at most review
  *  - a senior title                                   -> at most review
  *  - a freelance project with more than 150 proposals -> skip (stored, never alerted automatically)
+ *  - a freelance project with 61 to 150 proposals     -> at most review (crowded: never "a good opportunity")
+ *  - a freelance main task that is not technical      -> skip (payroll, story writing... even with a skill tag)
+ *  - a freelance main task that is unclear            -> at most review (no technical deliverable in the title or
+ *                                                       the start of the description, or title and text disagree)
+ *  - a fixed price or hourly rate under the USD floor -> skip
+ *  - a budget with no reliable USD conversion         -> at most review (nothing is estimated)
  *  - a project language outside the profile languages -> at most review
  *  - a strong skill that appears only in the skill tags, never in the title or description -> at most review
  * Opportunities without an employmentType (sources of projects) are returned untouched.
@@ -61,6 +72,14 @@ export function applyEngagementPolicy(base: FilterResult, opportunity: Opportuni
     return skip(`too many proposals (${opportunity.proposalCount}) for an automatic alert`);
   }
 
+  // The main task has to be technical: tags and passing mentions do not count (see judgeMainTask).
+  const mainTask = type === 'freelance' ? judgeMainTask(opportunity, profile) : null;
+  if (mainTask?.verdict === 'skip') return skip(mainTask.reason);
+
+  // A budget under the USD floor is not worth an alert, whatever the skills (internal USD equivalent, see budget.ts).
+  const budget = type === 'freelance' ? judgeBudget(opportunity, profile) : null;
+  if (budget?.verdict === 'skip') return skip(budget.reason);
+
   // A source that publishes no location requirement at all (a projects marketplace) has nothing to judge here.
   const location = opportunity.locationRequirement === undefined ? null : classifyLocation(opportunity.locationRequirement);
   if (location?.verdict === 'incompatible') return skip(`location "${location.raw}" excludes residents of Brazil`);
@@ -69,6 +88,12 @@ export function applyEngagementPolicy(base: FilterResult, opportunity: Opportuni
 
   const caveats: string[] = [];
   const info: string[] = [];
+
+  if (mainTask?.verdict === 'unclear') caveats.push(mainTask.reason);
+  if (budget?.verdict === 'unconvertible') caveats.push(budget.reason);
+  if (type === 'freelance' && opportunity.proposalCount !== null && opportunity.proposalCount > MAX_PROPOSALS_FOR_SHORTLIST) {
+    caveats.push(`crowded project (${opportunity.proposalCount} proposals): at most a review`);
+  }
 
   if (type === 'unknown') caveats.push('employment type not stated');
   else if (type === 'other') caveats.push(`employment type "${String(opportunity.sourceMetadata.jobTypeRaw ?? 'other')}" is not recognized`);
@@ -122,6 +147,65 @@ function strongSkillInText(opportunity: Opportunity, profile: InterestProfile): 
   });
 }
 
+type Judgement = { verdict: 'ok' } | { verdict: 'skip' | 'unclear'; reason: string };
+
+/**
+ * Is the MAIN task technical? Judged from the title and the start of the description, where a project says what it
+ * needs delivered; the skill tags and mentions deep in the text prove nothing (a payroll job can list "HTML").
+ *  - the title names a non-technical task and no technical deliverable    -> skip, unless the start of the description
+ *    describes a technical deliverable and names no non-technical task (then title and text disagree: unclear)
+ *  - no technical deliverable in the title or the start of the description -> skip when the start names a
+ *    non-technical task, otherwise unclear
+ * A profile without this vocabulary judges nothing.
+ */
+function judgeMainTask(opportunity: Opportunity, profile: InterestProfile): Judgement {
+  const deliverables = profile.deliverableSignals ?? [];
+  const offTopic = profile.offTopicTasks ?? [];
+  if (deliverables.length === 0 && offTopic.length === 0) return { verdict: 'ok' };
+
+  const title = padWords(normalizeText(opportunity.title));
+  const lead = padWords(normalizeText(opportunity.description.slice(0, DESCRIPTION_LEAD_LENGTH)));
+  const titleTech = findTerms(title, deliverables).length > 0;
+  const leadTech = findTerms(lead, deliverables).length > 0;
+  const titleOff = findTerms(title, offTopic)[0];
+  const leadOff = findTerms(lead, offTopic)[0];
+
+  if (titleTech) return { verdict: 'ok' };
+  if (titleOff) {
+    // The start of the description names non-technical work too: a technical word beside it is incidental.
+    if (leadTech && leadOff === undefined) return { verdict: 'unclear', reason: `title names non-technical work ("${titleOff}") but the description starts with a technical deliverable` };
+    return { verdict: 'skip', reason: `main task is not technical: "${titleOff}" in the title and no technical deliverable in the title or the start of the description` };
+  }
+  if (leadTech) return { verdict: 'ok' };
+  if (leadOff) return { verdict: 'skip', reason: `main task is not technical: "${leadOff}" at the start of the description and no technical deliverable in the title or there` };
+  return { verdict: 'unclear', reason: 'technical deliverable is not clear in the title or the start of the description' };
+}
+
+type BudgetJudgement = { verdict: 'ok' } | { verdict: 'skip'; reason: string } | { verdict: 'unconvertible'; reason: string };
+
+/**
+ * A fixed price or hourly rate whose USD equivalent (the higher end of its range) is under the profile floor is skipped.
+ * A currency with no reliable rate is at most a review: no value is invented. No budget, or one that is neither fixed
+ * nor hourly, is not judged.
+ */
+function judgeBudget(opportunity: Opportunity, profile: InterestProfile): BudgetJudgement {
+  const floors = profile.budgetFloors;
+  if (!floors) return { verdict: 'ok' };
+  const usd = budgetInUsd(opportunity);
+  if (usd.status === 'none') return { verdict: 'ok' };
+  if (usd.status === 'unconvertible') {
+    return { verdict: 'unconvertible', reason: usd.currency === '' ? 'budget currency not stated: no reliable USD conversion' : `budget currency "${usd.currency}" has no reliable USD conversion` };
+  }
+  const best = Math.max(usd.minUsd ?? 0, usd.maxUsd ?? 0);
+  if (usd.kind === 'fixed' && best < floors.fixedUsd) {
+    return { verdict: 'skip', reason: `fixed budget of about US$${formatUsd(best)} is below the US$${floors.fixedUsd} floor` };
+  }
+  if (usd.kind === 'hourly' && best < floors.hourlyUsd) {
+    return { verdict: 'skip', reason: `hourly rate of about US$${formatUsd(best)}/h is below the US$${floors.hourlyUsd}/h floor` };
+  }
+  return { verdict: 'ok' };
+}
+
 function looksLikeTeamRole(opportunity: Opportunity): boolean {
   const text = normalizeText(`${opportunity.title}\n${opportunity.description}`);
   return TEAM_ROLE.some((pattern) => pattern.test(text));
@@ -135,8 +219,11 @@ export function mainCaveat(reasons: readonly string[]): string | null {
   const order: RegExp[] = [
     /^location .*(ambiguous|not stated)|^location not stated$|^description mentions/,
     /^employment type (not stated|".*" is not recognized)|^project language/,
+    /^title names non-technical work|^technical deliverable is not clear/,
+    /^crowded project/,
     /^seniority in the title/,
     /^strong skills appear only as tags/,
+    /^budget currency/,
     /^conflicting or advanced scope|^only weak signals|^no strong technical signal|^status could not be confirmed|is outside the profile|^broad category/,
   ];
   for (const pattern of order) {

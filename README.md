@@ -273,10 +273,11 @@ sources**. Owed alerts are ranked first: (1) shortlist before review; (2) crowdi
 high priority, 21-60 normal, 61-150 reduced (a source without proposal counts is normal); (3) the most recent publication day (Brasília
 calendar day; unknown last); (4) more strong skills; (5) fewer proposals; (6) the stable id, so the order never depends on insertion
 order. What does not fit stays **pending and unmarked** and is sent by a later run; data older than the source allows is withheld first
-and does not use a slot. A freelance project with **more than 150 proposals** is stored but never alerted automatically, and a project in a
-language outside the profile languages (`pt`, `en`) is at most a review. The 99Freelas decisions are not touched by these rules.
+and does not use a slot. A freelance project with **more than 150 proposals** is stored but never alerted automatically, **61 to 150 is at most a review** (never a green
+"boa oportunidade"), and a project in a language outside the profile languages (`pt`, `en`) is at most a review. The 99Freelas decisions are not
+touched by these rules.
 
-## Filter (`basic-v5`)
+## Filter (`basic-v6`)
 
 Deterministic, no AI. Every decision carries concrete reasons, the matched terms and the rule
 version. Signals are searched in title, description and skills:
@@ -305,6 +306,22 @@ when the text mentions a skill word; a freelance job that reads like a continuin
 `America and the Americas are compatible. "Remote" is never read as worldwide. A strong skill that appears only in the skill **tags** (never in the title or description) is at most `review` for these sources.
 Freelancer.com projects are freelance by nature and have no location requirement, so only the type, category, team-role, seniority and
 tag rules apply to them. Projects from 99Freelas have no such fields and are evaluated exactly as before.
+
+**Freelance projects (`basic-v6`, quality rules).** Only for sources with an engagement type (Freelancer.com, Remotive), and only lowering:
+
+- **Main task.** Tags and passing mentions are not enough: the title and the **start of the description** (first 500 characters) must show a
+  technical deliverable (site, landing page, WordPress, API, integration, bot, automation, bug fix...). A non-technical main task (payroll,
+  story writing, trading, copywriting, translation, data entry...) is **skipped** even with a skill tag; a title that names non-technical work
+  over a technical description, or no clear deliverable at all, is at most `review`. The vocabulary lives in `src/profile/don-bruno.ts`
+  (`deliverableSignals`, `offTopicTasks`).
+- **Budget.** The original budget and currency are kept as the source states them. The filter compares an **internal USD equivalent** (the higher
+  end of the range, using the `exchange_rate` the official Freelancer.com API publishes for the currency, saved in
+  `sourceMetadata.exchangeRateToUsd`): a fixed price under **US$50** or an hourly rate under **US$8/h** is **skipped** (defaults in
+  `budgetFloors` of the profile). A currency with no reliable rate is at most `review`; nothing is estimated. The conversion is not shown in Telegram.
+- **Competition.** Up to 60 proposals may be shortlisted, **61 to 150 are at most `review`**, more than 150 are skipped.
+
+Telegram's "Como a IA pode ajudar" is chosen in this order: bug or error, then API or integration, then WordPress, then front-end, then
+automation.
 
 When the rule version changes, stored decisions are re-evaluated automatically (see below).
 

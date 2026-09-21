@@ -97,6 +97,17 @@ test('the budget keeps its original currency code, range and kind (fixed or hour
   assert.equal(normalizeBudget(project(8, { type: 'weird' }) as never).budget!.kind, 'unknown');
 });
 
+test('the rate to USD the API publishes for the currency is kept beside the budget, only when it is usable', () => {
+  const inr = toOpportunity(project(20, { currency: { code: 'INR', id: 11, exchange_rate: 0.010439 }, budget: { minimum: 12_500, maximum: 37_500 } }) as never, NOW.toISOString())!;
+  assert.deepEqual(inr.budget, { currency: 'INR', kind: 'fixed', min: 12_500, max: 37_500 }, 'the original budget is untouched');
+  assert.equal(inr.sourceMetadata.exchangeRateToUsd, 0.010439);
+  assert.equal(toOpportunity(project(21, { currency: { code: 'USD', id: 1, exchange_rate: 1 } }) as never, 'x')!.sourceMetadata.exchangeRateToUsd, 1);
+  for (const exchange_rate of [undefined, null, 0, -2, 'abc']) {
+    const opportunity = toOpportunity(project(22, { currency: { code: 'EUR', id: 8, exchange_rate } }) as never, 'x')!;
+    assert.equal(opportunity.sourceMetadata.exchangeRateToUsd, null, `rate ${String(exchange_rate)} is not usable`);
+  }
+});
+
 test('status: only "active" is open; closed is closed; anything else is not confirmed', () => {
   assert.equal(normalizeStatus('active').status, 'open');
   assert.equal(normalizeStatus('closed').status, 'closed');

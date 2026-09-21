@@ -3,20 +3,23 @@ import type { Opportunity } from '../domain/opportunity.js';
 
 /** Above this many proposals a project is stored but never alerted automatically (too crowded to be worth a message). */
 export const MAX_PROPOSALS_FOR_ALERT = 150;
+/** Above this many proposals a project is crowded: at most a review, never a shortlist ("good opportunity"). */
+export const MAX_PROPOSALS_FOR_SHORTLIST = 60;
+const HIGH_PRIORITY_PROPOSALS = 20;
 
 /**
  * How crowded a project already is, as an alert priority (lower is better):
  *   0 high     up to 20 proposals
  *   1 normal   21 to 60
- *   2 reduced  61 to 150
+ *   2 reduced  61 to 150   (never a shortlist)
  * Only a source that publishes engagement types and proposal counts (a projects marketplace) has one; every other
  * opportunity is "normal", so its order is decided by the other criteria alone.
  */
 export function competitionTier(opportunity: Opportunity): 0 | 1 | 2 {
   const proposals = opportunity.proposalCount;
   if (opportunity.employmentType === undefined || proposals === null) return 1;
-  if (proposals <= 20) return 0;
-  if (proposals <= 60) return 1;
+  if (proposals <= HIGH_PRIORITY_PROPOSALS) return 0;
+  if (proposals <= MAX_PROPOSALS_FOR_SHORTLIST) return 1;
   return 2;
 }
 

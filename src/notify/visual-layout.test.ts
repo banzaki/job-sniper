@@ -83,16 +83,30 @@ test('AI help is chosen by fixed rules from the kind of work in the text, and ne
   assert.match(aiHelpFor(work('Site em WordPress', 'Ajustar o tema do WordPress.'), true)!, /^Acelerar a montagem das seções, o ajuste do tema/);
   assert.match(aiHelpFor(work('Integração', 'Integrar nossa API de pagamentos ao sistema.'), true)!, /^Ajudar a esboçar as chamadas, o tratamento de erros/);
   assert.match(aiHelpFor(work('Bot', 'Um bot de Telegram para avisar pedidos.'), true)!, /^Ajudar a desenhar o fluxo, escrever o script inicial/);
-  assert.match(aiHelpFor(work('Correção', 'Corrigir um bug no formulário de contato.'), true)!, /^Ajudar a investigar a causa, sugerir correções/);
   for (const text of [web, aiHelpFor(work('x', 'wordpress'), true)!, aiHelpFor(work('x', 'bot'), true)!]) {
     assert.match(text, /Você ainda controla briefing, decisões e entrega\.$/);
     assert.ok(!/você (domina|sabe|é especialista|tem experiência)|dominar|expert/i.test(text), 'no claim of mastery');
   }
 });
 
-test('the most specific kind wins: front-end named technologies beat a passing word about integration', () => {
-  assert.match(aiHelpFor(work('Listing pages', 'New pages in HTML, CSS and JavaScript with an integration to our jobs feed.'), true)!, /^Acelerar a estrutura inicial/);
-  assert.match(aiHelpFor(work('Store', 'WordPress store with HTML tweaks and an API.'), true)!, /^Acelerar a montagem das seções/);
+const BUG_HELP = 'Ajudar a organizar o diagnóstico, levantar hipóteses e montar um checklist de validação. Você executa e confirma cada correção.';
+
+test('priority: a bug or error beats WordPress, an API or integration beats generic front-end, and plain kinds keep their sentence', () => {
+  // A bug or error to fix is diagnosis work, whatever the platform.
+  assert.equal(aiHelpFor(work('Fix Critical WordPress Errors', 'White screens across several WordPress installs.'), true), BUG_HELP);
+  assert.equal(aiHelpFor(work('Correção', 'Corrigir um bug no formulário de contato.'), true), BUG_HELP);
+  assert.equal(aiHelpFor(work('Erro no site', 'O checkout mostra um erro ao pagar.'), true), BUG_HELP);
+  assert.equal(aiHelpFor(work('Store', 'WordPress store with a bug in the cart and an API.'), true), BUG_HELP, 'bug also beats an API');
+  assert.ok(!BUG_HELP.includes('Você ainda controla'), 'the bug sentence has its own closing');
+  // An API or integration beats generic front-end and WordPress.
+  const integration = /^Ajudar a esboçar as chamadas, o tratamento de erros/;
+  assert.match(aiHelpFor(work('Listing pages', 'New pages in HTML, CSS and JavaScript with an integration to our jobs feed.'), true)!, integration);
+  assert.match(aiHelpFor(work('Shop', 'WordPress shop that syncs stock through an API.'), true)!, integration);
+  // "error handling" describes an integration, not a bug to fix.
+  assert.match(aiHelpFor(work('Payments API', 'Connect the API with proper error handling.'), true)!, integration);
+  // Common cases.
+  assert.match(aiHelpFor(work('WordPress site', 'A WordPress site with a custom theme and five sections.'), true)!, /^Acelerar a montagem das seções, o ajuste do tema e a revisão do conteúdo\./);
+  assert.match(aiHelpFor(work('Landing page', 'A responsive page in HTML, CSS and JavaScript.'), true)!, /^Acelerar a estrutura inicial, os componentes e a revisão responsiva\./);
 });
 
 test('with no clear or safe signal there is no AI help, and the block is omitted', () => {
@@ -103,6 +117,8 @@ test('with no clear or safe signal there is no AI help, and the block is omitted
   assert.equal(isSafeForAiHelp('skip', []), false);
   assert.equal(isSafeForAiHelp('review', ['conflicting or advanced scope: LLM']), false);
   assert.equal(isSafeForAiHelp('review', ['strong skills appear only as tags, not in the title or description']), false);
+  assert.equal(isSafeForAiHelp('review', ['technical deliverable is not clear in the title or the start of the description']), false);
+  assert.equal(isSafeForAiHelp('review', ['title names non-technical work ("story") but the description starts with a technical deliverable']), false);
   assert.equal(isSafeForAiHelp('shortlist', ['strong signals: HTML']), true);
 });
 

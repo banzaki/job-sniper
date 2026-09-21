@@ -26,4 +26,13 @@ export interface InterestProfile {
   nonSpecificCategories: readonly string[];
   /** Languages the person can work in (ISO 639-1). A project in another language is at most a review. Omit to accept any. */
   languages?: readonly string[];
+  /**
+   * Words that name a technical deliverable (a site, an API, a bot, a fix...). Together with `offTopicTasks` they decide
+   * whether the MAIN task of a freelance project is technical. Omit both to skip that check.
+   */
+  deliverableSignals?: readonly KeywordRule[];
+  /** Words that name a main task that is not technology (payroll, story writing, trading...), whatever skills are tagged. */
+  offTopicTasks?: readonly KeywordRule[];
+  /** Budgets below these USD equivalents are not worth an alert: a fixed price, and an hourly rate. Omit to accept any. */
+  budgetFloors?: { fixedUsd: number; hourlyUsd: number };
 }

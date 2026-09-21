@@ -115,8 +115,9 @@ const project = (over: Partial<Opportunity> = {}): Opportunity =>
   });
 const decide = (opportunity: Opportunity) => evaluateOpportunity(opportunity, donBrunoProfile, NOW);
 
-test('a freelance project with more than 150 proposals is stored but never alerted; 150 is still allowed', () => {
-  assert.equal(decide(project({ proposalCount: 150 })).decision, 'shortlist');
+test('a freelance project with more than 150 proposals is stored but never alerted; up to 150 stays a review', () => {
+  assert.equal(decide(project({ proposalCount: 60 })).decision, 'shortlist');
+  assert.equal(decide(project({ proposalCount: 150 })).decision, 'review', '61 to 150 is crowded: at most a review');
   const crowded = decide(project({ proposalCount: 151 }));
   assert.equal(crowded.decision, 'skip');
   assert.equal(crowded.reasons[0], 'too many proposals (151) for an automatic alert');

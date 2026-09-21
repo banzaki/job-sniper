@@ -1,8 +1,9 @@
 import type { FilterResult } from '../domain/filter-result.js';
 import type { Opportunity } from '../domain/opportunity.js';
-import type { InterestProfile, KeywordRule } from '../profile/interest-profile.js';
+import type { InterestProfile } from '../profile/interest-profile.js';
 import { normalizeText, padWords } from '../text.js';
 import { applyEngagementPolicy } from './engagement-policy.js';
+import { findTerms } from './keyword-match.js';
 
 /**
  * basic-v3: adds the engagement/location policy for job sources; results for project sources are unchanged.
@@ -10,8 +11,11 @@ import { applyEngagementPolicy } from './engagement-policy.js';
  * that publishes no location; results for 99Freelas are unchanged.
  * basic-v5: a freelance project with more than 150 proposals is skipped and one in a language outside the profile is at
  * most a review; results for 99Freelas are unchanged.
+ * basic-v6: for freelance projects, the main task must be technical (a non-technical main task is skipped, an unclear
+ * one is at most a review), a budget under the USD floor is skipped, a budget with no reliable USD conversion and a
+ * project with 61 to 150 proposals are at most a review; results for 99Freelas are unchanged.
  */
-export const FILTER_RULE_VERSION = 'basic-v5';
+export const FILTER_RULE_VERSION = 'basic-v6';
 
 interface CategoryInfo {
   direct: string | null;
@@ -125,18 +129,6 @@ function evaluateSkills(opportunity: Opportunity, profile: InterestProfile, now:
   return result('skip', [
     `category "${category.other}" is not on the interest list and no interest signals were found`,
   ]);
-}
-
-function findTerms(paddedText: string, rules: readonly KeywordRule[]): string[] {
-  return rules
-    .filter((rule) => {
-      let text = paddedText;
-      for (const phrase of rule.except ?? []) {
-        text = text.split(pad(normalize(phrase))).join(' ');
-      }
-      return [rule.term, ...(rule.aliases ?? [])].some((spelling) => text.includes(pad(normalize(spelling))));
-    })
-    .map((rule) => rule.term);
 }
 
 function classifyCategory(opportunity: Opportunity, profile: InterestProfile): CategoryInfo {

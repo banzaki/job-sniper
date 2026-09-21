@@ -88,9 +88,11 @@ Everything is still stored; only the best opportunities reach Telegram, without 
   normal, 61-150 reduced (sources without proposal counts are normal); (3) most recent publication day (Brasília calendar day, unknown last);
   (4) more strong skills; (5) fewer proposals; (6) stable id `source:id`. The tier sits between decision and recency so "high priority" really
   outranks a newer but crowded project (a reading of the spec's list; recency and strong skills still order everything inside a tier).
-- **Filter `basic-v5`:** a freelance project with **more than 150 proposals** is skipped (stored, never alerted); a project whose language is outside
+- **Filter `basic-v5` (superseded by `basic-v6` below):** a freelance project with **more than 150 proposals** is skipped (stored, never alerted); a project whose language is outside
   the profile languages (`InterestProfile.languages`, now `pt` and `en`) is at most a review. Both apply only to sources that publish an engagement
   type (Freelancer.com, Remotive); 99Freelas has none and is untouched.
+
+- **Filter `basic-v6` (ranking-quality hotfix):** for freelance projects the main task must be technical (title + first 500 characters of the description; payroll, story writing, trading and similar are skipped even with a skill tag, an unclear deliverable is at most a review); a fixed price under US$50 or an hourly rate under US$8/h (internal USD equivalent, higher end of the range) is skipped; a currency with no published rate is at most a review; 61-150 proposals are at most a review. The parser now keeps the API's `currency.exchange_rate` in `sourceMetadata.exchangeRateToUsd`. AI-help order: bug, API/integration, WordPress, front-end, automation. **Known limits:** rows collected before this hotfix have no stored rate, so their non-USD budgets are at most a review until the next collection refreshes them; the "technical deliverable" test is vocabulary-based (a bad guess is possible in both directions); the USD comparison uses the top of the range.
 
 **Validation:** on a copy of the real database, then on the real one: 70 rows re-evaluated, **0 of the 30 99Freelas decisions changed**, 5 Freelancer.com
 projects went to skip (239, 274, 240, 384 and 166 proposals). Copy dry run: 5 sent, repeat 5 different ones, overlap 0.

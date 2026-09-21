@@ -98,17 +98,23 @@ export function normalizeStatus(status: unknown): { status: Opportunity['status'
   return { status: 'unknown', evidence: label === null ? 'the API gave no status' : `the API status "${label}" has no known mapping` };
 }
 
-/** Fixed or hourly, in the ORIGINAL currency, exactly as the API states it. Never converted. */
-export function normalizeBudget(project: FreelancerProject): { budget: OpportunityBudget | null; type: string | null; code: string | null } {
+/**
+ * Fixed or hourly, in the ORIGINAL currency, exactly as the API states it. Never converted. The rate to USD the API
+ * publishes for that currency (`currency.exchange_rate`) is returned beside it, only for the filter's internal use.
+ */
+export function normalizeBudget(project: FreelancerProject): { budget: OpportunityBudget | null; type: string | null; code: string | null; exchangeRateToUsd: number | null } {
   const type = text(project.type)?.toLowerCase() ?? null;
   const budget = record(project.budget);
-  const code = text(record(project.currency)?.code)?.toUpperCase() ?? null;
-  if (!budget) return { budget: null, type, code };
+  const currency = record(project.currency);
+  const code = text(currency?.code)?.toUpperCase() ?? null;
+  const rate = num(currency?.exchange_rate);
+  const exchangeRateToUsd = rate !== null && rate > 0 ? rate : null;
+  if (!budget) return { budget: null, type, code, exchangeRateToUsd };
   const min = num(budget.minimum);
   const max = num(budget.maximum);
   const kind: OpportunityBudget['kind'] = min === null && max === null ? 'unknown' : type === 'hourly' ? 'hourly' : type === 'fixed' ? 'fixed' : 'unknown';
   // Without a currency code nothing is assumed: the amounts are kept, the currency is left empty.
-  return { budget: { currency: code ?? '', kind, min, max }, type, code };
+  return { budget: { currency: code ?? '', kind, min, max }, type, code, exchangeRateToUsd };
 }
 
 function skillNames(project: FreelancerProject): { names: string[]; category: string | null } {
@@ -167,7 +173,7 @@ export function toOpportunity(project: FreelancerProject, fetchedAt: string): Op
   const summary = toSummary(project, fetchedAt);
   if (!summary) return null;
   const { names, category } = skillNames(project);
-  const { budget, type, code } = normalizeBudget(project);
+  const { budget, type, code, exchangeRateToUsd } = normalizeBudget(project);
   const status = normalizeStatus(project.status);
   const bids = record(project.bid_stats);
   const upgrades = record(project.upgrades);
@@ -189,6 +195,7 @@ export function toOpportunity(project: FreelancerProject, fetchedAt: string): Op
     sourceMetadata: {
       projectType: type,
       currencyCode: code,
+      exchangeRateToUsd,
       budgetMin: budget?.min ?? null,
       budgetMax: budget?.max ?? null,
       bidAverage: num(bids?.bid_avg),
