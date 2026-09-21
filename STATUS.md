@@ -1,6 +1,23 @@
 # STATUS
 
-Last updated: 2026-09-21 (SPEC 007.2 Telegram visual layout implemented and accepted; SPEC 007.1 is d63cda8, SPEC 007 is 22b855a, SPEC 006 is cbd1516. Workana is suspended by its terms of use)
+Last updated: 2026-09-21 (PAUSE CHECKPOINT after a live Freelancer.com round on basic-v10, see below; SPEC 007.2 Telegram visual layout implemented and accepted; SPEC 007.1 is d63cda8, SPEC 007 is 22b855a, SPEC 006 is cbd1516. Workana is suspended by its terms of use)
+
+## PAUSE CHECKPOINT (2026-09-21) — operational and functional; next mission: SPEC 008 (OpenClaw Hunter Agent)
+
+The project is **paused in a working state**. Code is at `0e3df76` (basic-v10, preferred-currency budget, automatic daily limit, `notify:preview`, `notify:manual`,
+DRY_RUN guard on manual sends); the working tree is clean apart from the two known untracked files. Effective configuration: `DISPLAY_CURRENCY=USD`,
+`MAX_TELEGRAM_ALERTS_PER_RUN=5`, `MAX_TELEGRAM_ALERTS_PER_DAY=10` (automatic alerts only), `DRY_RUN=false`.
+
+**Last live round (Freelancer.com only, AI off, real Telegram, one run, 5 pages):** 5 site requests, 100 projects received = 92 already known + 8 new (shortlist 1,
+review 4, skip 3, top_match 0). The antiflood selected the 5 eligible new ones and all 5 were confirmed by Telegram (0 failures, no 401/403/429/timeout). The
+automatic day went from 5 to **10 of 10**; manual real deliveries (10) and previews (3) are counted apart and did not use it. No duplicate row or queue entry;
+the 83 backlog items and every older `notified_at` are untouched; alert_queue is now 10 selected + 9 overflow. All 5 budgets were already in USD, so this round
+showed the single-line budget; the converted-plus-original form was covered by tests and the earlier acceptance, not by this round.
+
+**Known gaps:** a basic (non-AI) alert stores no Telegram `message_id` (only `notified_at`), so a message id cannot be reported for it afterwards; the daily quota
+is used up until midnight in America/Sao_Paulo; the Personal Access Token of Freelancer.com lasts 30 days.
+
+**Next mission: SPEC 008 — OpenClaw Hunter Agent** (not started; it must respect the daily limit for its automatic alerts and use the manual paths only on the owner's request).
 
 ## RECON — Workana and Contra (2026-09-20, read-only; no adapter written, no Gemini, no Telegram)
 
@@ -702,6 +719,8 @@ from earlier runs are notified (not only those discovered in the current run).
   regenerating it with @BotFather (`/revoke`) and updating `.env`.
 
 ## Next authorized mission
+
+**SPEC 008 — OpenClaw Hunter Agent** is the next mission (see the pause checkpoint at the top). The paragraph below is the older state and stays for history.
 
 **SPEC 007 (Freelancer.com)** implemented and accepted live. Remotive (006) and Freelancer.com (007) are optional sources, off by default. Workana stays
 suspended by its terms of use. Nothing further (Contra, dashboard, scheduler, auto-apply, interactive buttons, a jobs mode) has been started.
