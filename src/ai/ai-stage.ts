@@ -15,6 +15,7 @@ export interface AiStageOptions {
   limit: number;
   force?: boolean;
   only?: OpportunityKey;
+  sourceIds?: readonly string[];
   clock?: Clock;
   isAlive?: (pid: number) => boolean;
   pid?: number;
@@ -58,6 +59,7 @@ export async function runAiStage(options: AiStageOptions): Promise<AiStageResult
         now: () => new Date(clock.now()),
         ...(options.force ? { force: true } : {}),
         ...(options.only ? { only: options.only } : {}),
+        ...(options.sourceIds ? { sourceIds: options.sourceIds } : {}),
       }),
   );
   if (!locked.acquired) return { status: 'locked', heldByPid: locked.heldByPid, expiresAt: locked.expiresAt };

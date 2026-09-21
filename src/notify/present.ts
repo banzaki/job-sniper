@@ -160,7 +160,7 @@ function mainCaveat(view: VerificationView, risks: readonly string[], tier: Tier
 }
 
 /** Leading list numbers and heading words ("1. Objetivo") are noise in a one-sentence description. */
-function firstSentence(text: string, max: number): string {
+export function firstSentence(text: string, max: number): string {
   const flat = text
     .replace(/\s+/g, ' ')
     .trim()

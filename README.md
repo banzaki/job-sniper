@@ -36,6 +36,38 @@ The stages are isolated: a failure in one never blocks delivering what is alread
    (`opportunities.notified_at`, `analyses.notified_at`) are written **only after Telegram confirms it**.
    A run that stops halfway resumes the stored message without repeating one already confirmed.
 
+## Sources
+
+`SOURCES` (comma separated) chooses what each run collects: `99freelas` (the default, unchanged), `remotive`, or both. Remotive is
+**off by default**.
+Each source runs with **its own limits** and its own identifiers (`sourceId:externalId`), so one never spends the
+other's budget, and a failure or a block in one is reported without stopping the other, the AI stage or the delivery of
+what is already stored. `npm run collect` and `npm run dev` both use this selection.
+
+**Remotive** (`remotive.com/api/remote-jobs?category=software-dev`, the documented public API; no browser, no page scraping).
+Version 1 looks for **freelance technology projects with a defined deliverable**: full time, part time, internship, ongoing team
+roles and, for now, plain `contract` jobs are **stored but never alerted** (a contract says nothing about a defined project).
+A jobs mode with its own analysis is a later step.
+- One response holds every job with its description, so a run makes **at most one request** and reads each job's "detail" from
+  that stored response, never one request per job. The response and the time of the last attempt are kept in the database
+  (`source_cache`), so they survive restarts.
+- **Minimum 6 hours between queries** (`REMOTIVE_MIN_INTERVAL_HOURS`, never lower; the API documentation advises at most 4 a
+  day). Runs in between reuse the cache. A failed attempt counts as a query and is not repeated in sequence (the older
+  response keeps being served). HTTP 429 or 403 stops querying until `Retry-After`, or the interval if longer.
+- Identity is the API `id`. Kept as published: original Remotive URL, title, company, category, tags, hiring type, required
+  location, pay text and publication date. HTML in the description is turned into plain text without ever rendering it.
+  Missing fields stay unknown. The pay text is **never** converted or treated as a budget (no currency, period or
+  annual-versus-hourly is inferred), and a publication time without a time zone is not turned into an instant.
+- The API says its jobs are delayed 24 hours (so an alert can be up to a day late), and that a link back to Remotive and a
+  mention of Remotive as the source are required; the Telegram message does both. The delay is documented here, not repeated in
+  every alert. Personal use only for now; the terms do not allow passing the jobs on to other
+  sites, and a public or paid service would need Remotive's permission (it offers a paid private API).
+- The category parameter did **not** restrict the response in the first real query (jobs of Writing, Design and others came
+  back, 20 in total), so relevance is decided locally, see the filter below.
+- AI analysis is **not** applied to Remotive: the prompt, the price suggestion (BRL) and the proposal draft are written for
+  freelance projects. Its opportunities are announced from the collected data and the basic filter only (no score, suggested
+  price or proposal). `ai:analyze -- --only remotive:<id>` still works explicitly.
+
 ## Discovery (persistent queue)
 
 Each run starts at the newest listing page. One page is read at a time (sequential, with the usual delay);
@@ -108,7 +140,7 @@ Per opportunity the model returns, and the program validates locally: score 0-10
 confidence, recommendation (`apply`/`review`/`skip`), fit explanation, matched and missing skills,
 risks, questions for the client, effort range, complexity, a BRL price range with rationale, and a
 proposal draft in Brazilian Portuguese. Invalid, incomplete or out-of-range answers are **never stored
-as a success**. The AI result is stored **next to** the deterministic `basic-v2` decision, never over it.
+as a success**. The AI result is stored **next to** the deterministic `basic-v3` decision, never over it.
 
 - **Skill verification.** The candidate profile (`src/profile/bruno-candidate.ts`) separates **confirmed**
   (verified by the owner), **unverified** (an interest; competence not verified), **learning** and
@@ -182,9 +214,16 @@ so in rare cases one message may appear twice. It is never silently dropped.
 
 `npm run notify:demo -- --id <sourceId:externalId> [--label x]` sends **one** identified preview ("🧪 PRÉVIA") of a
 saved analysis (no AI, no site access). It is stored as its own delivery, so it never marks the real notification, and
-repeating it with the same label sends nothing new. With `DRY_RUN=true` it only prints and writes nothing.
+repeating it with the same label sends nothing new. With `DRY_RUN=true` it only prints and writes nothing. An opportunity
+that has no analysis (every Remotive job) is previewed with its basic message, prefixed "🧪 PRÉVIA".
 
-## Filter (`basic-v2`)
+**Jobs from Remotive** are announced with one compact message (at most 1,000 characters) built only from the collected data
+and the basic filter: classification, title, source and company, hiring type, required location, pay **as published** (never
+converted, never called a budget), a one-sentence summary, the main caveat and the original Remotive link. When the publication
+date is reliable and at most 7 days old it adds "🆕 Publicada há X dias" (calendar days only; a date without a time zone gives just
+its day, and no time of day is ever shown); an older or unknown date gets no highlight. There is no score, suggested price or proposal, because none was produced.
+
+## Filter (`basic-v3`)
 
 Deterministic, no AI. Every decision carries concrete reasons, the matched terms and the rule
 version. Signals are searched in title, description and skills:
@@ -203,6 +242,15 @@ signal and no conflict (or a directly relevant subcategory plus several weak sig
 `review` for everything doubtful (only weak signals, broad category without a strong skill,
 unknown status, positive and conflicting signals together).
 
+**Jobs sources (engagement policy).** For a source that publishes jobs (Remotive), a second step runs after the skill rules and can
+only lower the result: full time, part time, internship and contract are **skipped** (stored, not sent automatically; a contract is
+never assumed to be a short project); a category that is clearly not technology (Writing, Design, Sales, ...) is **skipped** even
+when the text mentions a skill word; a freelance job that reads like a continuing team role ("join our team", "long term",
+"ongoing") is **skipped**; a missing or unrecognized type is at most `review` and never shown as freelance; a location that names only other countries or regions (for example "USA Only") is
+**skipped**; a location that is "Remote" alone, a time zone, "Worldwide except ...", missing, or restricted in the description
+(residence, work authorization) is at most `review`; a senior title is at most `review`. "Worldwide", Brazil, LATAM, South
+America and the Americas are compatible. "Remote" is never read as worldwide. Projects from 99Freelas have no such fields and are evaluated exactly as before.
+
 When the rule version changes, stored decisions are re-evaluated automatically (see below).
 
 ## Commands
@@ -210,7 +258,7 @@ When the rule version changes, stored decisions are re-evaluated automatically (
 | Command                  | Description                                                              |
 | ------------------------ | ------------------------------------------------------------------------ |
 | `npm run dev`            | One full pass: collect, AI (if enabled), notify                          |
-| `npm run collect`        | Collect only: discovery + queue + details (no AI, no Telegram)           |
+| `npm run collect`        | Collect only, for the sources in `SOURCES` (no AI, no Telegram)          |
 | `npm run opportunities`  | List stored opportunities by shortlist / review / skip (read-only view)  |
 | `npm run telegram:test`  | Send `🎯 Job Sniper online.` (printed only when `DRY_RUN=true`)          |
 | `npm run ai:analyze`     | Analyze pending opportunities (`-- --limit N`, `-- --only <id>`, `-- --force`); no site access |
@@ -233,10 +281,10 @@ SQLite through Node's built-in `node:sqlite` (no extra dependency; Node prints a
 "experimental" warning). The file and its folder are created automatically and are never
 deleted by the program. Database files are git-ignored.
 
-The schema version is kept in `PRAGMA user_version` (now **3**). Opening an older database migrates it
+The schema version is kept in `PRAGMA user_version` (now **4**). Opening an older database migrates it
 automatically and idempotently (only new tables are added; existing rows are untouched), after first
-copying it to `<name>.pre-v<N>.db` next to it (for example `job-sniper.pre-v3.db`, also git-ignored).
-Version 3 adds `discovery_queue`, `deliveries`, `delivery_parts`, `quota_usage`, `quota_state` and `run_locks`.
+copying it to `<name>.pre-v<N>.db` next to it (for example `job-sniper.pre-v4.db`, also git-ignored).
+Version 3 adds `discovery_queue`, `deliveries`, `delivery_parts`, `quota_usage`, `quota_state` and `run_locks`. Version 4 adds `source_cache` (the stored Remotive response and the time of its last attempt).
 
 ## Environment variables
 
@@ -246,6 +294,8 @@ Version 3 adds `discovery_queue`, `deliveries`, `delivery_parts`, `quota_usage`,
 | `MAX_DETAILS_PER_RUN`       | `20`                    | Max detail requests per run (invalid value → `20`)         |
 | `DISCOVERY_MAX_PAGES`       | `20`                    | Most listing pages read per run (positive integer, else the run fails) |
 | `DISCOVERY_TARGET_NEW`      | `100`                   | Stop paginating after this many **new** summaries were saved (positive integer, else the run fails) |
+| `SOURCES`                   | `99freelas`             | Sources collected per run: `99freelas`, `remotive` or both, comma separated |
+| `REMOTIVE_MIN_INTERVAL_HOURS` | `6`                   | Hours between Remotive queries, at least 6 (read only when `remotive` is enabled) |
 | `DRY_RUN`                   | `true`                  | `true`: print messages, send nothing, mark nothing. Only an explicit `false` sends |
 | `TELEGRAM_NOTIFY_DECISIONS` | `shortlist,review`      | Which decisions are notified                               |
 | `AI_ENABLED`                | `false`                 | `true` turns AI analysis on (anything else keeps it off)   |
@@ -302,15 +352,18 @@ src/
   profile/                       InterestProfile + Don Bruno's interests; CandidateProfile (skills, capabilities, aliases)
   ai/                            Analyzer contract, Gemini client, prompt, output validation, batch runner, quota
   domain/match-analysis.ts       MatchAnalysis, ProposalDraft, actionability (provider-independent)
-  filter/opportunity-filter.ts   Deterministic, explainable filter (basic-v2)
+  filter/opportunity-filter.ts   Deterministic, explainable filter (basic-v3); engagement-policy.ts and location.ts for job sources
   storage/                       SQLite: opportunities, analyses, discovery queue, deliveries, Gemini quota
-  pipeline/run-pipeline.ts       list -> save summaries (queue) -> details -> filter -> persist
+  pipeline/run-pipeline.ts       list -> save summaries (queue) -> details -> filter -> persist (one source)
+  pipeline/collect-sources.ts    runs each enabled source in turn; one failing never stops another
   pipeline/reevaluate.ts         Re-runs the filter on stored rows of older rule versions
   notify/                        Notifier, Telegram client, pt-BR compact presentation, resumable delivery
   sources/opportunity-source.ts  OpportunitySource contract (paged: listRecent(cursor) -> items + nextCursor)
   **/*.test.ts                   Offline tests next to the code they cover (npm test)
   sources/source-errors.ts       Blocked / not-found / unusable-response errors
   sources/99freelas/             First adapter: client (transport), parser (HTML), source
+  sources/remotive/              Second adapter: JSON API, safe HTML-to-text, persistent cache and interval
+  sources/create-sources.ts      Builds the enabled sources with their own limits
 .env.example                     Configuration template (no secrets)
 STATUS.md                        Current project state
 CLAUDE.md                        Working rules for the implementation agent

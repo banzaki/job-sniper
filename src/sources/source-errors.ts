@@ -1,8 +1,12 @@
 /** Access was refused or challenged (HTTP 403/429, CAPTCHA, bot protection). Never retry or bypass. */
 export class SourceBlockedError extends Error {
-  constructor(message: string) {
+  /** Seconds the source asked us to wait (Retry-After), when it said so. */
+  readonly retryAfterSeconds: number | null;
+
+  constructor(message: string, retryAfterSeconds: number | null = null) {
     super(message);
     this.name = 'SourceBlockedError';
+    this.retryAfterSeconds = retryAfterSeconds;
   }
 }
 

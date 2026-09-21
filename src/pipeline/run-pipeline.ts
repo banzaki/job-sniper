@@ -213,7 +213,8 @@ async function fetchDetails(context: {
 }): Promise<void> {
   const { source, store, profile, report, runStartedAt } = context;
 
-  const due = store.queue.listPending(context.now().toISOString());
+  // The queue is shared by every source; each source only ever works on its own items.
+  const due = store.queue.listPending(context.now().toISOString(), 1000, source.id);
   const byId = new Map(due.map((row) => [idOf(row.key), row]));
   const fresh = context.newInScanOrder.map((key) => byId.get(idOf(key))).filter((row): row is QueueRow => row !== undefined);
   const freshIds = new Set(fresh.map((row) => idOf(row.key)));

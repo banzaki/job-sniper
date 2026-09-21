@@ -11,6 +11,10 @@ export interface AppConfig {
   /** When true nothing is sent anywhere and nothing is marked as notified. Defaults to true. */
   dryRun: boolean;
   notifyDecisions: FilterDecision[];
+  /** Sources collected in each run, in this order. Defaults to the 99Freelas source alone. */
+  sources: SourceName[];
+  /** Hours between two queries to the Remotive API (at least 6; failed attempts count too). */
+  remotiveMinIntervalHours: number;
   telegramBotToken: string | null;
   telegramChatId: string | null;
 }
@@ -20,6 +24,11 @@ export const DEFAULT_DATABASE_PATH = './data/job-sniper.db';
 export const DEFAULT_MAX_DETAILS_PER_RUN = 20; // detail requests, shared between new and older pending items
 export const DEFAULT_DISCOVERY_MAX_PAGES = 20; // listing pages, newest first
 export const DEFAULT_DISCOVERY_TARGET_NEW = 100; // new summaries saved to the queue before pagination stops
+export const SOURCE_NAMES = ['99freelas', 'remotive'] as const;
+export type SourceName = (typeof SOURCE_NAMES)[number];
+export const DEFAULT_SOURCES: readonly SourceName[] = ['99freelas'];
+/** The Remotive documentation advises at most 4 queries a day. */
+export const DEFAULT_REMOTIVE_MIN_INTERVAL_HOURS = 6;
 export const DEFAULT_NOTIFY_DECISIONS: readonly FilterDecision[] = ['shortlist', 'review'];
 
 const DECISIONS: readonly FilterDecision[] = ['shortlist', 'review', 'skip'];
@@ -68,6 +77,11 @@ export function loadConfig(
     warn('Ignoring invalid DRY_RUN value; staying in dry-run mode. Use "true" or "false".');
   }
 
+  const sources = parseSources(env.SOURCES, warn);
+  const remotiveMinIntervalHours = sources.includes('remotive')
+    ? atLeast(env, 'REMOTIVE_MIN_INTERVAL_HOURS', DEFAULT_REMOTIVE_MIN_INTERVAL_HOURS, DEFAULT_REMOTIVE_MIN_INTERVAL_HOURS)
+    : DEFAULT_REMOTIVE_MIN_INTERVAL_HOURS;
+
   return {
     databasePath,
     maxDetailsPerRun,
@@ -75,6 +89,8 @@ export function loadConfig(
     discoveryTargetNew,
     dryRun,
     notifyDecisions: parseDecisions(env.TELEGRAM_NOTIFY_DECISIONS, warn),
+    sources,
+    remotiveMinIntervalHours,
     telegramBotToken: env.TELEGRAM_BOT_TOKEN?.trim() || null,
     telegramChatId: env.TELEGRAM_CHAT_ID?.trim() || null,
   };
@@ -186,6 +202,28 @@ function positiveInteger(env: NodeJS.ProcessEnv, name: string, fallback: number)
     throw new ConfigError(`${name} must be a positive integer, but got "${raw}".`);
   }
   return Number(raw);
+}
+
+/** Unset or blank gives the default; a positive integer below `minimum` is refused (the run fails). */
+function atLeast(env: NodeJS.ProcessEnv, name: string, fallback: number, minimum: number): number {
+  const value = positiveInteger(env, name, fallback);
+  if (value < minimum) throw new ConfigError(`${name} must be at least ${minimum}, but got ${value}.`);
+  return value;
+}
+
+/** A comma-separated list of known source names; unknown names are ignored with a warning, none valid gives the default. */
+function parseSources(raw: string | undefined, warn: (message: string) => void): SourceName[] {
+  if (!raw?.trim()) return [...DEFAULT_SOURCES];
+  const sources: SourceName[] = [];
+  for (const item of raw.split(',').map((part) => part.trim().toLowerCase()).filter(Boolean)) {
+    const name = SOURCE_NAMES.find((candidate) => candidate === item);
+    if (name) {
+      if (!sources.includes(name)) sources.push(name);
+    } else {
+      warn(`Ignoring unknown source "${item}" in SOURCES. Known sources: ${SOURCE_NAMES.join(', ')}.`);
+    }
+  }
+  return sources.length > 0 ? sources : [...DEFAULT_SOURCES];
 }
 
 function parseDecisions(

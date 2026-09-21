@@ -26,6 +26,8 @@ export interface AnalysisBatchOptions {
   force?: boolean;
   /** Analyze only this opportunity. */
   only?: OpportunityKey;
+  /** Automatic selection is limited to these sources (ignored with `only`). */
+  sourceIds?: readonly string[];
   now?: () => Date;
 }
 
@@ -54,7 +56,7 @@ export interface AnalysisBatchReport {
 export function planAnalyses(
   store: OpportunityStore,
   candidate: CandidateProfile,
-  options: { limit: number; force?: boolean; only?: OpportunityKey },
+  options: { limit: number; force?: boolean; only?: OpportunityKey; sourceIds?: readonly string[] },
 ): { keys: OpportunityKey[]; eligible: number } {
   const selection = store.analyses.select(analysisVersionFor(candidate), options);
   return { keys: selection.keys, eligible: selection.totalEligible };
@@ -75,6 +77,7 @@ export async function runAnalysisBatch(options: AnalysisBatchOptions): Promise<A
     limit: options.limit,
     ...(options.force ? { force: true } : {}),
     ...(options.only ? { only: options.only } : {}),
+    ...(options.sourceIds ? { sourceIds: options.sourceIds } : {}),
   });
   const report: AnalysisBatchReport = {
     eligible,

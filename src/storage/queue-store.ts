@@ -100,14 +100,15 @@ export class QueueStore {
   }
 
   /** Pending items whose retry time has come, oldest discovery first. */
-  listPending(nowIso: string, limit = 1000): QueueRow[] {
+  listPending(nowIso: string, limit = 1000, sourceId?: string): QueueRow[] {
     return this.db
       .prepare(
         `SELECT * FROM discovery_queue
          WHERE state = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+           AND (? IS NULL OR source_id = ?)
          ORDER BY first_discovered_at, external_id LIMIT ?`,
       )
-      .all(nowIso, limit)
+      .all(nowIso, sourceId ?? null, sourceId ?? null, limit)
       .map(toRow);
   }
 

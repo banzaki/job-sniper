@@ -3,7 +3,8 @@ import type { CandidateProfile } from '../profile/candidate-profile.js';
 import type { DeliveryKind, DeliveryRow } from '../storage/delivery-store.js';
 import type { OpportunityStore } from '../storage/opportunity-store.js';
 import { NotificationError, type Notifier } from './notifier.js';
-import { renderAnalysisMessage, type PresentMode } from './present.js';
+import { formatOpportunityMessage } from './format-message.js';
+import { renderAnalysisMessage, type PresentMode, type RenderedPart } from './present.js';
 
 /**
  * Marks the presentation format a delivery was planned in (compact: one message per opportunity). It is part of
@@ -68,6 +69,7 @@ export interface DemoOptions {
   dryRun: boolean;
   candidate?: CandidateProfile;
   sourceLabels?: Readonly<Record<string, string>>;
+  sourceNotes?: Readonly<Record<string, string>>;
   now?: () => Date;
 }
 
@@ -84,26 +86,37 @@ export interface DemoReport {
  * Delivers ONE visual preview of a saved analysis (no AI call). It is a separate delivery of kind "demo": it
  * never touches notified_at of the opportunity or of the analysis, so production flags stay as they were.
  * Repeating the same label sends nothing new. In dry-run the parts are only printed and nothing is stored.
+ * An opportunity WITHOUT a saved analysis is previewed with its basic message (filter result and collected data
+ * only): no score, suggested price or proposal is ever invented for it.
  */
 export async function deliverDemo(options: DemoOptions): Promise<DemoReport> {
   const { store, notifier, key, analysisVersion } = options;
   const now = options.now ?? (() => new Date());
 
   const stored = store.get(key);
+  if (!stored) throw new Error(`No stored opportunity ${key.sourceId}:${key.externalId}.`);
   const analysis = store.analyses.get(key, analysisVersion);
-  if (!stored || !analysis) {
-    throw new Error(`No saved analysis for ${key.sourceId}:${key.externalId} in version ${analysisVersion}.`);
-  }
 
-  const render = () =>
-    renderAnalysisMessage({
-      opportunity: stored.opportunity,
-      analysis: analysis.analysis,
-      mode: 'demo' satisfies PresentMode,
-      now: now(),
-      ...(options.candidate ? { candidate: options.candidate } : {}),
-      ...(options.sourceLabels ? { sourceLabels: options.sourceLabels } : {}),
-    });
+  const render = (): RenderedPart =>
+    analysis
+      ? renderAnalysisMessage({
+          opportunity: stored.opportunity,
+          analysis: analysis.analysis,
+          mode: 'demo' satisfies PresentMode,
+          now: now(),
+          ...(options.candidate ? { candidate: options.candidate } : {}),
+          ...(options.sourceLabels ? { sourceLabels: options.sourceLabels } : {}),
+        })
+      : {
+          label: 'Mensagem',
+          silent: false,
+          text: formatOpportunityMessage(stored.opportunity, stored.filter, {
+            preview: true,
+            now: now(),
+            ...(options.sourceLabels ? { sourceLabels: options.sourceLabels } : {}),
+            ...(options.sourceNotes ? { sourceNotes: options.sourceNotes } : {}),
+          }),
+        };
 
   if (options.dryRun) {
     const message = render();
@@ -111,7 +124,7 @@ export async function deliverDemo(options: DemoOptions): Promise<DemoReport> {
     return { totalParts: 1, partsSent: 0, partsAlreadyConfirmed: 0, complete: false, rendered: 1, failure: null };
   }
 
-  const ref = `${analysisVersion}#demo-${PRESENTATION}-${options.label}`;
+  const ref = `${analysis ? analysisVersion : 'basic'}#demo-${PRESENTATION}-${options.label}`;
   let delivery = store.deliveries.find('demo' satisfies DeliveryKind, key, ref);
   if (!delivery) {
     const message = render();

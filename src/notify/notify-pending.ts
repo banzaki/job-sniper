@@ -193,7 +193,7 @@ export async function notifyPending(options: NotifyOptions): Promise<NotifyRepor
       }
 
       if (entry.opportunity) {
-        await notifier.send(formatOpportunityMessage(stored.opportunity, stored.filter, options.format));
+        await notifier.send(formatOpportunityMessage(stored.opportunity, stored.filter, { ...options.format, now: now() }));
         report.kinds.basic += 1;
         if (dryRun) {
           report.rendered += 1;

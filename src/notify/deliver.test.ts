@@ -130,10 +130,17 @@ test('demo in dry-run prints the message but sends, stores and marks nothing', a
   assert.deepEqual(store.deliveries.counts(), { complete: 0, incomplete: 0, partsPending: 0 });
 });
 
-test('the demo needs a saved analysis of the current version and never calls a provider', async () => {
+test('the demo needs a stored opportunity; without an analysis it previews the basic message and never calls a provider', async () => {
   const store = new OpportunityStore(':memory:');
+  await assert.rejects(demo(store, recorder().notifier), /No stored opportunity fake:1/);
+
   store.insert(makeOpportunity('1'), makeFilter(), '2026-05-01T00:00:00.000Z');
-  await assert.rejects(demo(store, recorder().notifier), /No saved analysis for fake:1/);
+  const { notifier, sent } = recorder();
+  const report = await demo(store, notifier);
+  assert.equal(report.partsSent, 1);
+  assert.match(sent[0]!.text, /^🧪 <b>PRÉVIA<\/b> · não é um alerta novo/);
+  assert.match(sent[0]!.text, /Orçamento do cliente/, 'the basic message, with no score, price or proposal');
+  assert.ok(!/Preço sugerido|Rascunho|Compatibilidade/.test(sent[0]!.text));
 });
 
 test('the channel\'s message ids are stored with each confirmed part', async () => {

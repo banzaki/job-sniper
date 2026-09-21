@@ -1,3 +1,4 @@
+import { SOURCE_LABELS, SOURCE_NOTES } from '../notify/source-labels.js';
 import { ANALYSIS_VERSION } from '../ai/current-version.js';
 import { ConfigError, loadAppConfig } from '../config.js';
 import type { OpportunityKey } from '../domain/opportunity.js';
@@ -8,7 +9,6 @@ import { brunoCandidate } from '../profile/bruno-candidate.js';
 import { OpportunityStore } from '../storage/opportunity-store.js';
 
 const USAGE = 'Usage: npm run notify:analyses -- --only <sourceId:externalId>[,<sourceId:externalId>...] (repeatable)';
-const SOURCE_LABELS = { '99freelas': '99Freelas' };
 
 function parseOnly(argv: readonly string[]): OpportunityKey[] {
   const keys: OpportunityKey[] = [];
@@ -44,7 +44,7 @@ async function main(): Promise<number> {
       analysisVersion: ANALYSIS_VERSION,
       only,
       candidate: brunoCandidate,
-      format: { sourceLabels: SOURCE_LABELS },
+      format: { sourceLabels: SOURCE_LABELS, sourceNotes: SOURCE_NOTES },
     });
     printNotifyReport(report, 'analyses only', config.dryRun);
     return report.failures.length > 0 ? 1 : 0;

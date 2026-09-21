@@ -80,6 +80,16 @@ export const donBrunoProfile: InterestProfile = {
     'Suporte Administrativo',
     'Tradução',
     'Vendas & Marketing',
+    // Categories of the Remotive job feed that are not programming (its API did not restrict by category).
+    'Writing',
+    'Design',
+    'Marketing',
+    'Sales',
+    'Sales / Business',
+    'Business',
+    'Customer Service',
+    'Human Resources',
+    'Finance / Legal',
   ],
   nonSpecificCategories: ['Outra Categoria', 'Outros', 'Other'],
 };

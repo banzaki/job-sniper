@@ -2,8 +2,10 @@ import type { FilterResult } from '../domain/filter-result.js';
 import type { Opportunity } from '../domain/opportunity.js';
 import type { InterestProfile, KeywordRule } from '../profile/interest-profile.js';
 import { normalizeText, padWords } from '../text.js';
+import { applyEngagementPolicy } from './engagement-policy.js';
 
-export const FILTER_RULE_VERSION = 'basic-v2';
+/** basic-v3: adds the engagement/location policy for job sources; results for project sources are unchanged. */
+export const FILTER_RULE_VERSION = 'basic-v3';
 
 interface CategoryInfo {
   direct: string | null;
@@ -32,12 +34,19 @@ interface CategoryInfo {
  *       missing / vague category                                   -> review (doubt favors review)
  *       anything else                                              -> skip
  * A weak signal alone never produces a shortlist.
+ *
+ * Then, only for sources that publish jobs (an employmentType), the engagement policy may lower the result
+ * (see engagement-policy.ts).
  */
 export function evaluateOpportunity(
   opportunity: Opportunity,
   profile: InterestProfile,
   now: Date = new Date(),
 ): FilterResult {
+  return applyEngagementPolicy(evaluateSkills(opportunity, profile, now), opportunity, profile);
+}
+
+function evaluateSkills(opportunity: Opportunity, profile: InterestProfile, now: Date): FilterResult {
   const meta = { evaluatedAt: now.toISOString(), ruleVersion: FILTER_RULE_VERSION };
   const result = (
     decision: FilterResult['decision'],

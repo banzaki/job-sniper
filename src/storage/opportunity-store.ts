@@ -15,12 +15,15 @@ import { DeliveryStore } from './delivery-store.js';
 import { QueueStore } from './queue-store.js';
 import { QuotaStore } from './quota-store.js';
 import { SCHEMA_V3 } from './schema-v3.js';
+import { SCHEMA_V4 } from './schema-v4.js';
+import { SourceCacheStore } from './source-cache-store.js';
 
 /**
  * 1: opportunities. 2: adds analyses and proposal_drafts. 3: adds the discovery queue, multi-part deliveries,
- * quota accounting and run locks. Upgrades only add tables: existing rows are never touched.
+ * quota accounting and run locks. 4: adds the persistent source cache. Upgrades only add tables: existing rows are
+ * never touched.
  */
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS opportunities (
@@ -77,6 +80,8 @@ export class OpportunityStore {
   readonly deliveries: DeliveryStore;
   /** Request accounting, cooldowns and locks for the AI provider. */
   readonly quota: QuotaStore;
+  /** Last response and attempt clock of sources that publish a whole feed at once. */
+  readonly sourceCache: SourceCacheStore;
 
   /** Opens (creating the folder and file when missing) the database at `path`. */
   constructor(path: string) {
@@ -90,6 +95,7 @@ export class OpportunityStore {
       this.queue = new QueueStore(this.db);
       this.deliveries = new DeliveryStore(this.db);
       this.quota = new QuotaStore(this.db);
+      this.sourceCache = new SourceCacheStore(this.db);
       this.hasStatement = this.db.prepare(
         'SELECT 1 AS present FROM opportunities WHERE source_id = ? AND external_id = ?',
       );
@@ -320,6 +326,7 @@ export class OpportunityStore {
       this.db.exec(SCHEMA);
       this.db.exec(ANALYSIS_SCHEMA);
       this.db.exec(SCHEMA_V3);
+      this.db.exec(SCHEMA_V4);
     });
     if (version < SCHEMA_VERSION) {
       this.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);

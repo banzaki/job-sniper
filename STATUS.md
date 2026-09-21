@@ -1,12 +1,172 @@
 # STATUS
 
-Last updated: 2026-09-20 (SPEC 005 implemented, compact Telegram format applied after Tech Lead review; awaiting review, not committed. SPEC 004 committed as 4aa3f07)
+Last updated: 2026-09-21 (SPEC 006 Remotive accepted after the review adjustments (V1 scope, recency line); commit follows. SPEC 005 is 58f8831, SPEC 004 is 4aa3f07. Workana is suspended by its terms of use)
 
-## SPEC 005 — Readable Telegram, persistent queue, quota control (implemented; awaiting review)
+## RECON — Workana and Contra (2026-09-20, read-only; no adapter written, no Gemini, no Telegram)
 
-**Status:** code, offline tests and the limited live acceptance are done. **Not committed** (waiting for the Tech Lead's review).
-The SPEC 004 checkpoint is committed (`4aa3f07`, "feat: add AI opportunity analysis and proposal drafts"); the SPEC 005
-changes are uncommitted on top of it.
+Method: about 15 spaced requests in total, identified as `JobSniper/0.1 (personal opportunity monitor)`, no login, no cookies
+kept, no CAPTCHA or block seen on either site (both sit behind Cloudflare). Nothing was bypassed.
+
+**Workana (`workana.com`) — feasible without login or browser.**
+- `robots.txt` allows `/jobs` and `/job/*`; it disallows `/api/` (not used), `*?*ag=1` and login/signup with query.
+- **Listing:** `GET /jobs?language=pt&page=N`. The plain HTML has no results (Vue shell); the SAME URL with the headers the site's
+  own front-end sends (`Accept: application/json`, `X-Requested-With: XMLHttpRequest`) returns JSON: `results.results[]`,
+  `results.pagination` (`page`, `pages` = 100, `total` capped at 10000, `nextPage`, URL template). Fields per item: `slug`,
+  `title` (HTML), `description`, `budget` (text band), `isHourly`, `skills[]`, `postedDate` (relative: "há 1 hora"),
+  `totalBids`, `country`, `isSearchFeatured`. Only about 9 items per page (nominal limit 20); featured items are pinned on top, so
+  order is not strictly by date; pages overlap slightly (1 of 9 seen).
+- **Detail:** `GET /job/<slug>`, server-rendered HTML (about 9 KB): title, "Publicado em 20 de Setembro de 2026" (day only), category,
+  subcategory, size, duration, skills, status "Aberto", proposals and interested-freelancers counts, description. **No budget in the
+  detail** (only in the listing).
+- **Stable id:** the slug (a path segment, no numeric id seen). Assumed stable; not verified against title edits.
+- **Restrictions:** budgets are in **USD bands** ("USD 100 - 250", "Menos de USD 50", "... / hora"), not BRL; today's client budget
+  formatting assumes reais. Proposals need a logged-in account (not needed for monitoring).
+- **Terms of use (read afterwards, SPEC 006 preflight): explicit restriction found — Workana integration STOPPED.**
+  `https://www.workana.com/terms` redirects to the Spanish "TÉRMINOS Y CONDICIONES DE WORKANA" (help.workana.com). Two clauses apply to
+  an automated collector: (1) section "RESTRICCIONES", item (v): users may not "introducir o implementar programas o secuencias de
+  comandos con el fin de extraer información, indexar, escudriñar o de otro modo realizar minería de datos en ninguna parte del Sitio de
+  Workana" (no scripts or programs to extract information, index, scrape or data-mine any part of the site); (2) community rules:
+  users may not "Utilizar un robot, araña web, procesos manuales y/o automáticos o dispositivos para realizar minería de datos,
+  rastreos, extraer información o indexar el Sitio de Workana de alguna manera" (no robot, web spider or automatic process to
+  crawl or extract information). The terms also forbid copying or downloading any element of the site without prior written consent.
+  `robots.txt` allowing `/jobs` does not override these clauses. The RECON requests above (about 15) were made before the terms
+  were read; no further request to Workana has been made and none will be until the decision below.
+- **Simplest adapter:** plain `fetch` for both calls, JSON for the listing and cheerio for the detail, same shape as the 99Freelas adapter.
+
+**Contra (`contra.com`) — not confirmed feasible; likely needs a session and/or a browser.**
+- `robots.txt` allows crawling of public pages (`Content-Signal: ai-train=no`); it does not disallow `/api/`.
+- `/opportunities` returns 200 but is a client-rendered app (Relay/GraphQL, `apiUrl: https://contra.com/api/`); the server-rendered
+  state holds no opportunity records. The `sitemap.xml` lists only hire pages, users, articles and services: **no opportunity pages
+  are public or indexable**. No public detail URL was found, so no stable id, pagination or field list could be confirmed.
+- Getting the feed would mean reverse-engineering the site's private GraphQL calls (fragile, and possibly logged-in only) or driving a
+  browser with an authenticated session. Step needed from Don to go further: log in himself in a browser and capture, in DevTools
+  Network, the request that loads the opportunities feed (URL, method, and whether it works without cookies), WITHOUT sharing
+  credentials or tokens in chat. Contra's terms were not read.
+
+**Recommendation (superseded by the terms finding above; technically Workana is the easier source, but its terms forbid the
+method):** integrate **Workana first**. It needs no login or browser and has a clear id, pagination and fields. Points to
+handle in that SPEC: currency (USD bands) in the budget model and message; the listing budget must reach the stored opportunity
+(the `fetchDetail(externalId)` contract only receives the id, so the queue's stored summary or the contract must carry it); relative
+listing dates; featured items breaking the newest-first order; reading Workana's terms before enabling a live run.
+Rough effort: Workana about one SPEC of the size of the 99Freelas adapter (client, parser, source, fixtures and about 40 offline
+tests, plus the small currency and budget-carry changes). Contra: at least two to three times that, dominated by unknowns.
+
+## SPEC 006 — Remotive as the second source (implemented; awaiting review)
+
+**Status:** code, offline tests and the limited live acceptance are done. **Not committed**; the working tree is on top of 58f8831.
+
+- **Adapter** (`src/sources/remotive/`): `RemotiveSource` over plain `fetch` and the documented API
+  `remotive.com/api/remote-jobs?category=software-dev`; no browser, no page scraping. One response holds every job with its
+  description, so each "detail" is read from the stored response (no request per job).
+- **Identity:** the API `id` (as text), under `sourceId = remotive`. Ids are unique per source everywhere (opportunities, queue,
+  deliveries). Kept as published: original Remotive URL (only https remotive.com is accepted), title, company, category, tags,
+  hiring type, required location, pay text, publication date. HTML becomes plain text without rendering (scripts, styles, handlers,
+  links, iframes dropped; entities decoded; bounded). Absent fields stay unknown; the pay is never converted, never a budget.
+  A publication time without a time zone is **not** turned into an instant (publishedAt stays null, the raw text is kept).
+  Status: "open" because the API lists the job as live at download time (feed delayed 24 h; applications not verified);
+  access is unknown.
+- **Generic changes (minimal):** `Opportunity` gained optional `employmentType`, `locationRequirement`, `compensation`
+  (undefined for 99Freelas); `SourceBlockedError` carries `retryAfterSeconds`; the queue is listed per source; `SOURCES` and
+  `REMOTIVE_MIN_INTERVAL_HOURS` in the config; `collectSources` runs each source with its own limits and isolates failures;
+  automatic AI selection is limited to `AI_SOURCE_IDS = ['99freelas']` (the analysis prompt, BRL price and proposal do not fit a
+  job feed; `--only` still works).
+- **Cache and frequency:** schema **v4** adds `source_cache` (last response, last attempt, next allowed time). At least 6 hours
+  between queries, counted from the attempt (recorded before the request), failures included; a failure serves the older
+  response and is not repeated in sequence; 429/403 waits max(interval, Retry-After). Restart-safe.
+- **Scope of version 1 (review decision):** freelance technology projects with a defined deliverable. Remotive stays **disabled by
+  default** (`SOURCES` defaults to 99freelas). A jobs mode is a later step and was not started.
+- **Filter `basic-v3`:** engagement policy for job sources (only lowers a result): full time, part time, internship and **contract**
+  -> skip (stored, never alerted; a contract says nothing about a defined project); a category that is clearly not technology
+  (Writing, Design, Marketing, Sales, Customer Service, ...) -> **skip** even with a skill word in the text; freelance that reads like
+  a continuing team role ("join our team", "long term", "ongoing", "integrar a equipe") -> skip; missing/unknown type -> at most review,
+  never shown as freelance; a location naming only other places -> skip; "Remote" alone, time zones, "Worldwide except", missing or
+  restricted in the description -> at most review; senior title -> at most review; Brazil, LATAM, South America, Americas,
+  worldwide -> compatible.
+- **Telegram:** one compact message (at most 1,000 characters) from collected data only: classification, title, source and company,
+  type, required location, pay as published, one-sentence summary, main caveat and the original link. No
+  score, suggested price or proposal. The 24 h delay of the feed is documented here and in the README, not repeated in each alert.
+  Recency: "🆕 Publicada há X dias" only for a reliable date at most 7 days old (calendar days; the API date has no time zone, so
+  only its day is used and no time of day is shown); older or unknown dates get no highlight. `notify:demo` previews an opportunity without analysis with its basic message.
+
+**Live acceptance (2026-09-21, no Gemini):**
+- Migration validated on a copy first, then applied to the real database by the first command (automatic backup
+  `data/job-sniper.pre-v4.db`). On the copy: only `source_cache` was added; 0 of the 29 99Freelas rows changed decision, reasons,
+  keywords, `notified_at` or `first_seen_at` under `basic-v3` (only the rule version label changes).
+- **One** query: HTTP 1 request, 20 jobs (the API itself reports `total-job-count: 20`; the `category` parameter did not restrict
+  it: Writing, Design, Customer Service and others came back). By type: full_time 12, freelance 4, contract 3, part_time 1.
+  Decisions under the first rules: skip 16, review 4 (three "Senior" contract jobs and a freelance copywriter), shortlist 0. After
+  the review adjustments (contract, non-technology category and team roles skipped) the 20 stored rows were re-evaluated:
+  **skip 20, review 0, shortlist 0** (3 contract, 12 full time, 1 part time, and 4 freelance: a copywriter in Writing plus three
+  that were already skipped by the skill or location rules). Nothing is pending to notify from Remotive. No relevant
+  opportunity in this sample; the filters were not weakened to produce one.
+- Second run: 0 requests (cache), 20 already known, 0 new, 0 details, 0 duplicates (20 rows, 20 distinct ids).
+- Telegram: dry-run preview, then one real preview of `remotive:2091140` (400 visible characters, with `message_id`, identified
+  "PRÉVIA"); the repeat sent 0. Production flags untouched (99Freelas 7 notified, Remotive 0, analyses 1); `quota_usage` empty.
+
+**Known limits / risks:**
+- There is no per-run cap on basic notifications. With the V1 rules a first run of a fresh feed is unlikely to be large, but a burst is possible.
+- The team-role wording rule ("ongoing", "long term", "join our team") is deliberately blunt: a project that says "ongoing support" is skipped too.
+- The public API returned only 20 jobs in total and ignored the category; coverage is small and mixed, so most of it is skipped.
+- Location and seniority are text rules (a listed country set, title words); wording outside them becomes review, never shortlist.
+- A job that drops out of the feed before its detail is read becomes `unavailable` after two not-found answers (local reads).
+- Remotive's terms allow personal use with attribution; a public or sold service would need its permission (it sells a private API).
+- AI analysis for jobs (contract or salary roles) is not written; Remotive items get no score, price or proposal.
+
+## RECON — official channels and alternative sources (2026-09-20, documentation only; no job collection, nobody contacted)
+
+Method: web search plus reading public documentation and terms pages. No vacancy was fetched, nothing was implemented, no dependency added.
+Personal use here means alerts for Don Bruno's own Telegram; a service sold to others is a different case and is called out per source.
+
+**Workana — no official API, feed or partner program found.** The only official channel is email notification of new projects
+(help center article "How do I configure project notifications received by email", `help.workana.com`); a community post says it is
+Premium-only (unofficial, not verified). Email parsing would be a different integration; not evaluated further.
+
+**Contra — no official job feed found.** Third-party listings (API Evangelist, apis.io) describe a read-only "Public API" under
+`contra.com/public-api/` with an `X-API-Key` header covering programs, filters and expert profiles, not job listings; the URL returned
+404 when opened, so this is **unverified**. The help center only mentions the in-app "Job feed". Correction to the earlier RECON: Contra also
+has public SEO pages such as `contra.com/featured-jobs/freelance-coding-jobs`; they were not opened and their origin (Contra clients or
+aggregated) is unknown, and their terms were not read.
+
+**Candidates (up to three), most relevant first**
+1. **Freelancer.com official API** (freelance projects; best fit). Docs `developers.freelancer.com`; terms `freelancer.com/about/apiterms`.
+   Access: own account, "Get API Key" at `freelancer.com/developers`, accept the terms, OAuth2 token (header `freelancer-oauth-v1`);
+   sandbox at `freelancer-sandbox.com`. Project search and details exist (`/api/projects/0.1/projects...`); fields reported by the
+   official SDK: id, title, seo_url, description, budget min/max, currency, time_submitted, status, type (fixed/hourly/local/hireme),
+   bid_stats, jobs (skills). I could not read the endpoint reference page itself (docs are script-rendered), so filters and rate-limit
+   numbers are **unconfirmed**. Terms (read): personal and internal use allowed; you "may not sell, rent, lease, sublicense,
+   redistribute, or syndicate access to the API"; charging for an application is allowed; "will not rely on the functioning ... of the
+   API in the conduct of your ordinary course business"; "may not use the API to replicate or compete with the services offered by
+   Freelancer"; cached data must be refreshed at least every 24 hours, stored with strong encryption, and deleted on termination;
+   no circumventing rate limits. Fit for personal use, with **one design conflict**: our database keeps opportunities indefinitely,
+   which the 24-hour cache rule may not allow; a retention decision (or written clarification from Freelancer, requested by Don) is needed.
+   A sold service would need explicit permission; the terms do not allow sharing API access with customers.
+2. **Hacker News, official Firebase API** (`github.com/HackerNews/API`, base `hacker-news.firebaseio.com/v0/`). No key, no documented
+   rate limit; the monthly "Freelancer? Seeking freelancer?" thread is a story item whose `kids` are the posts. Real freelance and
+   one-off work, but low volume, free-text posts (no budget or currency fields; text would need extraction) and a mix of people offering
+   work and people seeking it. The repository is MIT-licensed; that does not by itself grant rights over the posts, and no data terms were found.
+   Easiest to integrate technically, weakest in structure and volume.
+3. **Remotive public API** (`remotive.com/api/remote-jobs`, docs `github.com/remotive-com/remote-jobs-api`). No key. Fields: id, url, title,
+   company_name, category, job_type (includes freelance and contract), publication_date, candidate_required_location, salary,
+   description (HTML). Rules: at most about 4 fetches per day, above 2 per minute is blocked, listings delayed 24 hours, and you must
+   link back and cite Remotive; violations end access. **Mostly employment**, not project work. Personal use fits; redistribution
+   or a sold service would need Remotive's permission. Remote OK (`remoteok.com/api`) is similar (attribution and link-back required,
+   USD salary range, ISO dates) and also mostly jobs.
+
+**Not usable now:** Upwork has an official GraphQL API (`api.upwork.com/graphql`, OAuth2, approved credentials, marketplace job
+postings permission), but its developer and legal pages returned HTTP 403 to our fetch, so its terms are **unread**; secondary
+sources say scraping and automation outside the API are against its terms. Not bypassed; needs Don to read the API terms and request credentials.
+
+**Recommendation:** Freelancer.com first, as the only candidate that is an official API for freelance projects with budget and
+currency fields, and personal use is allowed by its terms. Before any SPEC: Don creates the developer account and API key himself (never in
+chat) and decides, with the Tech Lead, how to handle the 24-hour cache rule. Effort estimate: one adapter SPEC smaller than the
+99Freelas one (JSON API, no HTML parsing), plus the generic multi-source and currency work already outlined for Workana. Hacker News
+is the fallback if a no-key, quick proof of the multi-source path is wanted.
+
+## SPEC 005 — Readable Telegram, persistent queue, quota control (approved; committed 58f8831)
+
+**Status:** approved by the Tech Lead and committed as `58f8831`. The SPEC 004 checkpoint is `4aa3f07`
+("feat: add AI opportunity analysis and proposal drafts"). Former partial multi-part deliveries stay *held*: explicit state
+in the report, no automatic re-send, unsent parts never marked as delivered.
 
 - **Telegram (pt-BR), compact format (Tech Lead decision, replaces the summary + details format):** ONE message per
   opportunity, aiming at 600-900 visible characters with a ceiling of 1000: classification and title, platform, one
@@ -435,6 +595,6 @@ from earlier runs are notified (not only those discovered in the current run).
 
 ## Next authorized mission
 
-**SPEC 005 — Readable Telegram, persistent queue, quota control.** Implemented and accepted live within limits;
-Tech Lead review pending before its commit. Nothing further (dashboard, scheduler, second source, auto-apply,
-interactive buttons) has been started.
+**SPEC 006 (Remotive)** implemented and accepted live; Tech Lead review pending before its commit. Workana stays suspended by
+its terms of use; Freelancer.com remains the recommended next source (see the RECON section). Nothing further (Contra, dashboard,
+scheduler, auto-apply, interactive buttons) has been started.

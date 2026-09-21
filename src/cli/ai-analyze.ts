@@ -1,7 +1,7 @@
 import { runAiStage } from '../ai/ai-stage.js';
 import { planAnalyses } from '../ai/analysis-batch.js';
 import { createAnalyzer } from '../ai/create-analyzer.js';
-import { ANALYSIS_VERSION } from '../ai/current-version.js';
+import { AI_SOURCE_IDS, ANALYSIS_VERSION } from '../ai/current-version.js';
 import { describePlan, describeQuotaUsage, describeStage } from '../ai/format-report.js';
 import { ConfigError, loadAiConfig, loadAppConfig } from '../config.js';
 import type { OpportunityKey } from '../domain/opportunity.js';
@@ -52,7 +52,7 @@ async function main(): Promise<number> {
     return 0;
   }
   const limit = Math.min(args.limit ?? ai.maxAnalysesPerRun, ai.maxAnalysesPerRun);
-  const selection = { limit, ...(args.force ? { force: true } : {}), ...(args.only ? { only: args.only } : {}) };
+  const selection = { limit, sourceIds: AI_SOURCE_IDS, ...(args.force ? { force: true } : {}), ...(args.only ? { only: args.only } : {}) };
 
   const store = new OpportunityStore(config.databasePath);
   try {
@@ -70,7 +70,7 @@ async function main(): Promise<number> {
     const stage = await runAiStage({ store, analyzer, candidate: brunoCandidate, ...selection });
     for (const line of describeStage(stage, analyzer.id, analyzer.model)) console.log(line);
 
-    const counts = store.analyses.counts(ANALYSIS_VERSION);
+    const counts = store.analyses.counts(ANALYSIS_VERSION, AI_SOURCE_IDS);
     console.log(
       `totals for ${ANALYSIS_VERSION}: success=${counts.success} failed=${counts.failed} (exhausted ${counts.exhausted}) ` +
         `pending=${counts.pending} | basic-skip kept aside=${counts.keptAside}`,

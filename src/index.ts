@@ -2,23 +2,19 @@ import { describeQuotaUsage, describeStage, describePlan } from './ai/format-rep
 import { planAnalyses } from './ai/analysis-batch.js';
 import { runAiStage } from './ai/ai-stage.js';
 import { createAnalyzer } from './ai/create-analyzer.js';
-import { ANALYSIS_VERSION } from './ai/current-version.js';
+import { AI_SOURCE_IDS, ANALYSIS_VERSION } from './ai/current-version.js';
 import { loadAiConfig, loadAppConfig } from './config.js';
 import { FILTER_RULE_VERSION } from './filter/opportunity-filter.js';
 import { createNotifier } from './notify/create-notifier.js';
 import { printNotifyReport } from './notify/format-report.js';
 import { notifyPending } from './notify/notify-pending.js';
-import { describeCollect } from './pipeline/format-report.js';
+import { SOURCE_LABELS, SOURCE_NOTES } from './notify/source-labels.js';
+import { collectSources } from './pipeline/collect-sources.js';
 import { reevaluateOutdated } from './pipeline/reevaluate.js';
-import { runPipeline } from './pipeline/run-pipeline.js';
 import { brunoCandidate } from './profile/bruno-candidate.js';
 import { donBrunoProfile } from './profile/don-bruno.js';
-import { Freelas99Client } from './sources/99freelas/99freelas-client.js';
-import { Freelas99Source } from './sources/99freelas/99freelas-source.js';
-import { SourceBlockedError } from './sources/source-errors.js';
+import { createSourceRuns } from './sources/create-sources.js';
 import { OpportunityStore } from './storage/opportunity-store.js';
-
-const SOURCE_LABELS = { '99freelas': '99Freelas' };
 
 const reason = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
@@ -33,8 +29,6 @@ async function main(): Promise<number> {
   const notifier = createNotifier(config);
   const ai = loadAiConfig();
 
-  const client = new Freelas99Client();
-  const source = new Freelas99Source(client);
   const store = new OpportunityStore(config.databasePath);
   let exitCode = 0;
 
@@ -56,21 +50,12 @@ async function main(): Promise<number> {
     // ---- stage 1: collect ----
     console.log('\n== collect ==');
     try {
-      const report = await runPipeline({
-        source,
-        store,
-        profile: donBrunoProfile,
-        maxDetailsPerRun: config.maxDetailsPerRun,
-        maxPages: config.discoveryMaxPages,
-        targetNew: config.discoveryTargetNew,
-      });
-      for (const line of describeCollect(report, client.requestCount)) console.log(line);
-      if (report.aborted) exitCode = 2;
-      else if (report.stopReason === 'source-error') exitCode = Math.max(exitCode, 1);
+      // Each enabled source runs with its own limits; one failing never stops the next.
+      const collected = await collectSources(createSourceRuns(config, store), store, donBrunoProfile);
+      exitCode = Math.max(exitCode, collected.exitCode);
     } catch (error) {
-      const blocked = error instanceof SourceBlockedError;
-      console.error(blocked ? `Blocked by the source, stopping collection without retry: ${reason(error)}` : `Collection failed: ${reason(error)}`);
-      exitCode = blocked ? 2 : Math.max(exitCode, 1);
+      console.error(`Collection failed: ${reason(error)}`);
+      exitCode = Math.max(exitCode, 1);
     }
 
     // ---- stage 2: AI analysis (its failure or quota never blocks stage 3) ----
@@ -79,9 +64,9 @@ async function main(): Promise<number> {
       if (!ai.enabled) {
         console.log('ai analysis: disabled (AI_ENABLED is not "true")');
       } else if (!analyzer) {
-        for (const line of describePlan(planAnalyses(store, brunoCandidate, { limit: ai.maxAnalysesPerRun }))) console.log(line);
+        for (const line of describePlan(planAnalyses(store, brunoCandidate, { limit: ai.maxAnalysesPerRun, sourceIds: AI_SOURCE_IDS }))) console.log(line);
       } else {
-        const stage = await runAiStage({ store, analyzer, candidate: brunoCandidate, limit: ai.maxAnalysesPerRun });
+        const stage = await runAiStage({ store, analyzer, candidate: brunoCandidate, limit: ai.maxAnalysesPerRun, sourceIds: AI_SOURCE_IDS });
         for (const line of describeStage(stage, analyzer.id, analyzer.model)) console.log(line);
         if (stage.status === 'ran' && (stage.batch.stopReason !== 'completed' || stage.batch.failed > 0)) exitCode = Math.max(exitCode, 1);
       }
@@ -101,7 +86,7 @@ async function main(): Promise<number> {
         dryRun: config.dryRun,
         analysisVersion: ANALYSIS_VERSION,
         candidate: brunoCandidate,
-        format: { sourceLabels: SOURCE_LABELS },
+        format: { sourceLabels: SOURCE_LABELS, sourceNotes: SOURCE_NOTES },
       });
       printNotifyReport(notification, config.notifyDecisions.join(','), config.dryRun);
       if (notification.failures.length > 0) exitCode = Math.max(exitCode, 1);

@@ -33,6 +33,30 @@ const RULES: { pattern: RegExp; render: (match: RegExpExecArray) => string }[] =
     pattern: /^no interest signals, but the category is missing$/,
     render: () => 'sem sinais de interesse, e a categoria não foi informada',
   },
+  // Jobs sources (engagement type and required location).
+  {
+    pattern: /^employment type: (freelance|contract|full time|part time|internship)( (not sent automatically))?$/,
+    render: (m) => {
+      const label = { freelance: 'freelance', contract: 'contrato', 'full time': 'tempo integral', 'part time': 'meio período', internship: 'estágio' }[m[1] as string];
+      return `tipo de contratação: ${label}${m[2] ? ' (não enviada automaticamente)' : ''}`;
+    },
+  },
+  { pattern: /^category "(.+)" is not technology$/, render: (m) => `categoria "${m[1]}" não é de tecnologia` },
+  {
+    pattern: /^reads like an ongoing team position, not a defined project$/,
+    render: () => 'parece vaga contínua em equipe, não um projeto com entrega definida',
+  },
+  { pattern: /^employment type not stated$/, render: () => 'tipo de contratação não informado' },
+  { pattern: /^employment type "(.+)" is not recognized$/, render: (m) => `tipo de contratação "${m[1]}" não reconhecido` },
+  { pattern: /^location "(.+)" excludes residents of Brazil$/, render: (m) => `localização "${m[1]}" exclui quem mora no Brasil` },
+  { pattern: /^location "(.+)" is ambiguous for a resident of Brazil$/, render: (m) => `localização "${m[1]}" é ambígua para quem mora no Brasil` },
+  { pattern: /^location "(.+)" is compatible with residence in Brazil$/, render: (m) => `localização "${m[1]}" é compatível com residência no Brasil` },
+  { pattern: /^location not stated$/, render: () => 'localização não informada' },
+  {
+    pattern: /^description mentions a location or work-authorization requirement$/,
+    render: () => 'a descrição menciona exigência de localização ou de autorização de trabalho',
+  },
+  { pattern: /^seniority in the title: (.+)$/, render: (m) => `senioridade no título: ${m[1]}` },
 ];
 
 export function translateReason(reason: string): string {

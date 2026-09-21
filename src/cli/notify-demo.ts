@@ -1,3 +1,4 @@
+import { SOURCE_LABELS, SOURCE_NOTES } from '../notify/source-labels.js';
 import { ANALYSIS_VERSION } from '../ai/current-version.js';
 import { ConfigError, loadAppConfig } from '../config.js';
 import type { OpportunityKey } from '../domain/opportunity.js';
@@ -7,7 +8,6 @@ import { brunoCandidate } from '../profile/bruno-candidate.js';
 import { OpportunityStore } from '../storage/opportunity-store.js';
 
 const USAGE = 'Usage: npm run notify:demo -- --id <sourceId:externalId> [--label <name>]';
-const SOURCE_LABELS = { '99freelas': '99Freelas' };
 
 function parseArgs(argv: readonly string[]): { key: OpportunityKey; label: string } {
   let raw = '';
@@ -43,6 +43,7 @@ async function main(): Promise<number> {
       dryRun: config.dryRun,
       candidate: brunoCandidate,
       sourceLabels: SOURCE_LABELS,
+      sourceNotes: SOURCE_NOTES,
     });
     console.log(
       config.dryRun

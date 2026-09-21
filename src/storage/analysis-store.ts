@@ -147,7 +147,10 @@ export class AnalysisStore {
    *  4. inside each group, alternating the most recent with the one waiting longest, so old items advance too.
    * Category, premium access or unverified competence never exclude anything by themselves.
    */
-  select(version: string, options: { limit: number; force?: boolean; only?: OpportunityKey }): AnalysisSelection {
+  select(
+    version: string,
+    options: { limit: number; force?: boolean; only?: OpportunityKey; sourceIds?: readonly string[] },
+  ): AnalysisSelection {
     const params: (string | number)[] = [version, options.force ? 1 : 0];
     const conditions = [`o.status = 'open'`, `(? = 1 OR a.status IS NULL OR a.status <> 'success')`];
     if (options.only) {
@@ -155,6 +158,11 @@ export class AnalysisStore {
       params.push(options.only.sourceId, options.only.externalId);
     } else {
       conditions.push(`o.filter_decision IN ('shortlist', 'review')`);
+      if (options.sourceIds) {
+        // Only "?" placeholders are generated; the ids are bound as parameters.
+        conditions.push(`o.source_id IN (${options.sourceIds.map(() => '?').join(', ') || 'NULL'})`);
+        params.push(...options.sourceIds);
+      }
       // Written without NOT(...) on purpose: a never-analyzed row has NULLs there, and NOT(NULL) would drop it.
       conditions.push(`(a.status IS NULL OR a.status <> 'failed' OR a.attempts < ${MAX_ANALYSIS_ATTEMPTS})`);
     }
@@ -323,8 +331,8 @@ export class AnalysisStore {
     }));
   }
 
-  counts(version: string): AnalysisCounts {
-    const pending = this.select(version, { limit: 1 }).totalEligible;
+  counts(version: string, sourceIds?: readonly string[]): AnalysisCounts {
+    const pending = this.select(version, { limit: 1, ...(sourceIds ? { sourceIds } : {}) }).totalEligible;
     const one = (sql: string): number => {
       const total = this.db.prepare(sql).get(version)?.total;
       return typeof total === 'number' ? total : 0;

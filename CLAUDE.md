@@ -47,6 +47,10 @@ terminal reports stay in English.
 - Gemini free tier: at least 15 s between request starts (retries included), a persisted daily counter
   (default 20 per model) reserved before each call, a stored cooldown after HTTP 429. Never bypass these,
   never add a fallback model or provider, and never call Gemini in acceptance or tests without explicit authorization.
+- Remotive (personal use): at most one API request per run and never less than 6 hours between queries (a failed attempt
+  counts), a 429/403 ends querying until Retry-After, no per-job requests, no page scraping. Always show Remotive as the
+  source with the original link. Its pay text is never converted or called a budget. Read a site's terms of use before
+  collecting from it; stop that integration when they forbid it (Workana's do).
 - A Telegram delivery is marked complete only when every part is confirmed. Never re-send history because
   the presentation changed. Ambiguous confirmations are recorded and reported, never hidden.
 - A real database is migrated only after the migration was validated on a copy; the automatic

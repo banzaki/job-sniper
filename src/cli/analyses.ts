@@ -1,4 +1,5 @@
-import { ANALYSIS_VERSION } from '../ai/current-version.js';
+import { SOURCE_LABELS, SOURCE_NOTES } from '../notify/source-labels.js';
+import { AI_SOURCE_IDS, ANALYSIS_VERSION } from '../ai/current-version.js';
 import { ConfigError, loadAppConfig } from '../config.js';
 import type { MatchAnalysis } from '../domain/match-analysis.js';
 import { renderAnalysisMessage } from '../notify/present.js';
@@ -7,7 +8,6 @@ import { OpportunityStore } from '../storage/opportunity-store.js';
 
 const USAGE = 'Usage: npm run analyses -- [--details] [--proposals] [--messages]';
 const GROUPS: readonly MatchAnalysis['recommendation'][] = ['apply', 'wait', 'review', 'skip'];
-const SOURCE_LABELS = { '99freelas': '99Freelas' };
 
 /** Shows stored AI analyses grouped by recommendation. Read-only: no network, no notifications. */
 function main(): number {
@@ -19,7 +19,7 @@ function main(): number {
   const store = new OpportunityStore(config.databasePath);
   try {
     const discarded = store.analyses.discardSuperseded(ANALYSIS_VERSION, new Date().toISOString());
-    const counts = store.analyses.counts(ANALYSIS_VERSION);
+    const counts = store.analyses.counts(ANALYSIS_VERSION, AI_SOURCE_IDS);
     console.log(
       `database: ${config.databasePath} | analysis version ${ANALYSIS_VERSION} | ` +
         `success=${counts.success} failed=${counts.failed} (exhausted ${counts.exhausted}) pending=${counts.pending} | ` +
