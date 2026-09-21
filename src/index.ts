@@ -65,7 +65,7 @@ async function main(): Promise<number> {
     // ---- the alert batch of this collection: persisted before anything is sent ----
     let batch: AlertBatchReport | null = null;
     try {
-      batch = selectAlertBatch(store, { batchId: runStartedAt, decisions: config.notifyDecisions, cap: config.maxTelegramAlertsPerRun, maxAgeHoursBySource: SOURCE_DATA_MAX_AGE_HOURS, now: new Date() });
+      batch = selectAlertBatch(store, { batchId: runStartedAt, decisions: config.notifyDecisions, cap: config.maxTelegramAlertsPerRun, dailyCap: config.maxTelegramAlertsPerDay, maxAgeHoursBySource: SOURCE_DATA_MAX_AGE_HOURS, now: new Date() });
       for (const line of describeAlertBatch(batch)) console.log(line);
     } catch (error) {
       console.error(`Alert batch selection failed (nothing new will be alerted in this run): ${reason(error)}`);
@@ -100,9 +100,10 @@ async function main(): Promise<number> {
         dryRun: config.dryRun,
         analysisVersion: ANALYSIS_VERSION,
         candidate: brunoCandidate,
-        format: { sourceLabels: SOURCE_LABELS },
+        format: { sourceLabels: SOURCE_LABELS, displayCurrency: config.displayCurrency },
         maxAgeHoursBySource: SOURCE_DATA_MAX_AGE_HOURS,
         maxAlerts: config.maxTelegramAlertsPerRun,
+        maxAlertsPerDay: config.maxTelegramAlertsPerDay,
         // Only the batch may receive a first notification. The old backlog is delivered on purpose, by "npm run backlog".
         alertKeys: batch?.alertKeys ?? [],
       });

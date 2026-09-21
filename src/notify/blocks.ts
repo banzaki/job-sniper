@@ -9,6 +9,8 @@ export const LOW_BUDGET_TEXT = 'Orçamento baixo para o escopo; avalie se compen
 /** The stored reason of a budget below the floor (the USD equivalent is never shown in this message). */
 const BELOW_FLOOR = / is below the US\$ \d+(\/h)? floor$/;
 const CROWDED = /^(very )?crowded project/;
+/** A range that crosses the floor. The converted range is already in the budget line, so it is not repeated here. */
+const CROSSES_FLOOR = / budget range of about US\$ .* crosses the US\$ (\d+)(\/h)? floor$/;
 
 /** The commercial ladder of an alert that comes from the deterministic filter alone. */
 export const CLASSIFICATION: Record<FilterDecision, string> = {
@@ -58,6 +60,8 @@ export function basicAttention(opportunity: Opportunity, filter: FilterResult, n
   const caveat = mainCaveat(filter.reasons);
   // A low budget is the main worry when it is the first caveat: it says what to weigh, not that the project is bad.
   if (caveat !== null && BELOW_FLOOR.test(caveat)) return LOW_BUDGET_TEXT;
+  const crossing = caveat === null ? null : CROSSES_FLOOR.exec(caveat);
+  if (crossing) return `Faixa de orçamento atravessa o piso de US$ ${crossing[1]}${crossing[2] ?? ''}.`;
   // Crowding is a warning only when nothing more relevant (a real doubt, a low budget) came first.
   if ((caveat === null || CROWDED.test(caveat)) && opportunity.proposalCount !== null) {
     const tier = competitionTier(opportunity);

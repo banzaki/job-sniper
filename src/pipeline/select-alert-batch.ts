@@ -1,5 +1,6 @@
 import type { FilterDecision } from '../domain/filter-result.js';
 import type { OpportunityKey } from '../domain/opportunity.js';
+import { dailyAllowance, type DailyAllowance } from '../notify/daily-limit.js';
 import { compareForAlert } from '../filter/ranking.js';
 import type { OpportunityStore, StoredOpportunity } from '../storage/opportunity-store.js';
 
@@ -10,6 +11,8 @@ export interface AlertBatchOptions {
   decisions: readonly FilterDecision[];
   /** Most alerts owed at once, blue ones included. */
   cap: number;
+  /** The personal limit of alerts confirmed per calendar day (America/Sao_Paulo). Omit for none. */
+  dailyCap?: number;
   /** Hours after which the collected data of a source is too old to alert from. */
   maxAgeHoursBySource?: Readonly<Record<string, number>>;
   now: Date;
@@ -33,6 +36,8 @@ export interface AlertBatchReport {
   alertKeys: OpportunityKey[];
   /** Owed opportunities that no automatic alert will pick (older than any batch, or overflow). */
   backlog: number;
+  /** The daily allowance at selection time, when a daily limit is configured. */
+  daily: DailyAllowance | null;
 }
 
 const zero = (): Record<FilterDecision, number> => ({ top_match: 0, shortlist: 0, review: 0, skip: 0 });
@@ -68,7 +73,10 @@ export function selectAlertBatch(store: OpportunityStore, options: AlertBatchOpt
     .map((key) => ({ key, stored: store.get(key) }))
     .filter((entry): entry is { key: OpportunityKey; stored: StoredOpportunity } => entry.stored !== null)
     .sort((a, b) => compareForAlert(a.stored, b.stored));
-  const free = Math.max(0, cap - carriedOver.length);
+  // Slots: the run cap, and what the day still allows (blue ones never exceed it); what is still owed keeps its place first.
+  const daily = options.dailyCap === undefined ? null : dailyAllowance(store, now, options.dailyCap);
+  const room = daily === null ? cap : Math.min(cap, daily.remaining);
+  const free = Math.max(0, room - carriedOver.length);
   const chosen = ranked.slice(0, free);
   const left = ranked.slice(free);
 
@@ -94,6 +102,7 @@ export function selectAlertBatch(store: OpportunityStore, options: AlertBatchOpt
     overflow: left.length,
     alertKeys: [...carriedOver, ...selected],
     backlog: store.alertQueue.listBacklog(decisions).length,
+    daily,
   };
 }
 
@@ -101,8 +110,9 @@ export function selectAlertBatch(store: OpportunityStore, options: AlertBatchOpt
 export function describeAlertBatch(report: AlertBatchReport): string[] {
   const c = report.candidates;
   const s = report.selectedByDecision;
+  const day = report.daily ? ` | day ${report.daily.day}: ${report.daily.automaticToday} of ${report.daily.cap} automatic, ${report.daily.remaining} left` : '';
   return [
-    `alert batch (cap ${report.cap}): new opportunities ${c.top_match + c.shortlist + c.review} (top_match ${c.top_match}, shortlist ${c.shortlist}, review ${c.review})`,
+    `alert batch (cap ${report.cap}${day}): new opportunities ${c.top_match + c.shortlist + c.review} (top_match ${c.top_match}, shortlist ${c.shortlist}, review ${c.review})`,
     `  selected now ${report.selected.length} (top_match ${s.top_match}, shortlist ${s.shortlist}, review ${s.review}) | carried over from an earlier batch (unsent) ${report.carriedOver.length} | released as stale ${report.expired}`,
     `  saved, never alerted automatically: ${report.overflow} from this collection | backlog (owed, not selected) ${report.backlog}: use "npm run backlog" to consult or send it on purpose`,
   ];

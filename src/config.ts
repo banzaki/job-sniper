@@ -17,6 +17,10 @@ export interface AppConfig {
   remotiveMinIntervalHours: number;
   /** Most Telegram alerts sent in one run, across all sources; the rest stay pending, unmarked. */
   maxTelegramAlertsPerRun: number;
+  /** Most Telegram alerts confirmed per calendar day (America/Sao_Paulo), across all sources and runs (1 to 1000). */
+  maxTelegramAlertsPerDay: number;
+  /** The currency the budget is shown in first, when a fresh rate is stored (a 3-letter code, default USD). */
+  displayCurrency: string;
   /** Listing pages of 20 projects read from Freelancer.com per run (1 to 10). Only this source reads it. */
   freelancerMaxPages: number;
   /** Freelancer.com Personal Access Token (valid 30 days); null when unset, which only disables that source. Never printed. */
@@ -41,6 +45,11 @@ export const MIN_FREELANCER_MAX_PAGES = 1;
 export const MAX_FREELANCER_MAX_PAGES = 10;
 /** Alerts per run: a small, ranked batch instead of a flood. */
 export const DEFAULT_MAX_TELEGRAM_ALERTS_PER_RUN = 5;
+/** A personal daily limit: a small, ranked batch is still a flood if every run sends one. */
+export const DEFAULT_MAX_TELEGRAM_ALERTS_PER_DAY = 10;
+export const MIN_TELEGRAM_ALERTS_PER_DAY = 1;
+export const MAX_TELEGRAM_ALERTS_PER_DAY = 1000;
+export const DEFAULT_DISPLAY_CURRENCY = 'USD';
 export const DEFAULT_NOTIFY_DECISIONS: readonly FilterDecision[] = ['top_match', 'shortlist', 'review'];
 
 const DECISIONS: readonly FilterDecision[] = ['top_match', 'shortlist', 'review', 'skip'];
@@ -108,6 +117,8 @@ export function loadConfig(
     sources,
     remotiveMinIntervalHours,
     maxTelegramAlertsPerRun: positiveInteger(env, 'MAX_TELEGRAM_ALERTS_PER_RUN', DEFAULT_MAX_TELEGRAM_ALERTS_PER_RUN),
+    maxTelegramAlertsPerDay: between(env, 'MAX_TELEGRAM_ALERTS_PER_DAY', DEFAULT_MAX_TELEGRAM_ALERTS_PER_DAY, MIN_TELEGRAM_ALERTS_PER_DAY, MAX_TELEGRAM_ALERTS_PER_DAY),
+    displayCurrency: currencyCode(env, 'DISPLAY_CURRENCY', DEFAULT_DISPLAY_CURRENCY),
     freelancerMaxPages,
     freelancerToken: env.FREELANCER_OAUTH_TOKEN?.trim() || null,
     telegramBotToken: env.TELEGRAM_BOT_TOKEN?.trim() || null,
@@ -228,6 +239,14 @@ function atLeast(env: NodeJS.ProcessEnv, name: string, fallback: number, minimum
   const value = positiveInteger(env, name, fallback);
   if (value < minimum) throw new ConfigError(`${name} must be at least ${minimum}, but got ${value}.`);
   return value;
+}
+
+/** Unset or blank gives the default; anything else must be a 3-letter currency code (case does not matter), or the run fails. */
+function currencyCode(env: NodeJS.ProcessEnv, name: string, fallback: string): string {
+  const raw = env[name]?.trim();
+  if (!raw) return fallback;
+  if (!/^[A-Za-z]{3}$/.test(raw)) throw new ConfigError(`${name} must be a 3-letter currency code such as USD, but got "${raw}".`);
+  return raw.toUpperCase();
 }
 
 /** Unset or blank gives the default; a positive integer outside [minimum, maximum] is refused (the run fails). */

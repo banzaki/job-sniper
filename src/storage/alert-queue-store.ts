@@ -121,6 +121,34 @@ export class AlertQueueStore {
     });
   }
 
+  /**
+   * A selected item that the owner then delivered BY HAND (notify:manual) is no longer an automatic alert: its batch id gets the
+   * "manual:" prefix, so the automatic count skips it. Nothing else about the entry changes; the delivery flag stays in opportunities.
+   */
+  markManual(key: OpportunityKey): void {
+    this.db
+      .prepare("UPDATE alert_queue SET batch_id = 'manual:' || batch_id WHERE source_id = ? AND external_id = ? AND status = 'selected' AND batch_id NOT LIKE 'manual:%'")
+      .run(key.sourceId, key.externalId);
+  }
+
+  /**
+   * What reached the owner in [start, end), in three separate kinds, all derived from the delivery records (so they survive restarts):
+   *  - automatic: opportunities that an automatic collection SELECTED (status selected) and Telegram confirmed. Only these use
+   *    the personal daily limit;
+   *  - manual: opportunities confirmed that no automatic selection chose, or that the owner delivered by hand (a manual delivery,
+   *    a backlog send, or an alert sent before the alert queue existed);
+   *  - previews: manual previews and demonstrations (deliveries of kind demo), which never mark an opportunity as delivered.
+   */
+  usageBetween(start: string, end: string): { automatic: number; manual: number; previews: number } {
+    const count = (sql: string, ...params: string[]): number => Number(this.db.prepare(sql).get(...params)?.n ?? 0);
+    const selected = `EXISTS (SELECT 1 FROM alert_queue q WHERE q.source_id = o.source_id AND q.external_id = o.external_id AND q.status = 'selected' AND q.batch_id NOT LIKE 'manual:%')`;
+    return {
+      automatic: count(`SELECT COUNT(*) AS n FROM opportunities o WHERE o.notified_at >= ? AND o.notified_at < ? AND ${selected}`, start, end),
+      manual: count(`SELECT COUNT(*) AS n FROM opportunities o WHERE o.notified_at >= ? AND o.notified_at < ? AND NOT ${selected}`, start, end),
+      previews: count("SELECT COUNT(*) AS n FROM deliveries WHERE kind = 'demo' AND status = 'complete' AND completed_at >= ? AND completed_at < ?", start, end),
+    };
+  }
+
   counts(): Record<AlertStatus, number> {
     const result: Record<AlertStatus, number> = { selected: 0, overflow: 0, expired: 0 };
     for (const row of this.db.prepare('SELECT status, COUNT(*) AS n FROM alert_queue GROUP BY status').all()) result[row.status as AlertStatus] = Number(row.n);

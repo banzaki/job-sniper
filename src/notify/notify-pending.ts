@@ -4,6 +4,7 @@ import type { CandidateProfile } from '../profile/candidate-profile.js';
 import type { DeliveryRow } from '../storage/delivery-store.js';
 import type { OpportunityStore } from '../storage/opportunity-store.js';
 import { compareForAlert } from '../filter/ranking.js';
+import { dailyAllowance, type DailyAllowance } from './daily-limit.js';
 import type { StoredOpportunity } from '../storage/opportunity-store.js';
 import { analysisDeliveryRef, sendDeliveryParts, type DeliveryAttempt } from './deliver.js';
 import { formatOpportunityMessage, type FormatOptions } from './format-message.js';
@@ -40,6 +41,11 @@ export interface NotifyOptions {
    * crowded one last, a clear main task, most recent day, fewer caveats, budget, fewer proposals, strong skills, stable id); those that do not fit stay pending and are never marked.
    */
   maxAlerts?: number;
+  /**
+   * The personal limit of alerts confirmed per calendar day (America/Sao_Paulo), counted from the delivery flags, so it persists
+   * across restarts and includes manual sends. What does not fit stays owed and unmarked, exactly as with `maxAlerts`.
+   */
+  maxAlertsPerDay?: number;
   now?: () => Date;
 }
 
@@ -72,6 +78,8 @@ export interface NotifyReport {
   failures: { id: string; message: string; ambiguous: boolean }[];
   /** Set when a failure made further sending pointless; remaining items stay pending. */
   aborted: string | null;
+  /** The daily allowance when this run started, when a daily limit was given. */
+  daily: DailyAllowance | null;
 }
 
 interface Pending {
@@ -110,7 +118,10 @@ export async function notifyPending(options: NotifyOptions): Promise<NotifyRepor
     heldByLimit: 0,
     failures: [],
     aborted: null,
+    daily: options.maxAlertsPerDay === undefined ? null : dailyAllowance(store, now(), options.maxAlertsPerDay),
   };
+  // The run limit and what the day still allows: the smaller one applies.
+  const maxAlerts = report.daily === null ? options.maxAlerts : Math.min(options.maxAlerts ?? Number.POSITIVE_INFINITY, report.daily.remaining);
   const allowed = options.only ? new Set(options.only.map(idOf)) : null;
   const wanted = (key: OpportunityKey): boolean => allowed === null || allowed.has(idOf(key));
 
@@ -200,7 +211,7 @@ export async function notifyPending(options: NotifyOptions): Promise<NotifyRepor
 
   for (const { id, entry, stored } of candidates) {
     // The limit is global, not per source: what does not fit stays pending, untouched and unmarked.
-    if (options.maxAlerts !== undefined && attempted >= options.maxAlerts) {
+    if (maxAlerts !== undefined && attempted >= maxAlerts) {
       report.heldByLimit += 1;
       continue;
     }
@@ -248,7 +259,7 @@ export async function notifyPending(options: NotifyOptions): Promise<NotifyRepor
       }
 
       if (entry.opportunity) {
-        await notifier.send(formatOpportunityMessage(stored.opportunity, stored.filter, { ...options.format, now: now() }));
+        await notifier.send(formatOpportunityMessage(stored.opportunity, stored.filter, { rates: store.exchangeRates, ...options.format, now: now() }));
         report.kinds.basic += 1;
         if (dryRun) {
           report.rendered += 1;

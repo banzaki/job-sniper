@@ -19,6 +19,25 @@ export interface TransactionalVocabulary {
   actions: readonly string[];
 }
 
+/**
+ * Vocabulary to recognize work whose central goal is to fabricate views, clicks, impressions, traffic or engagement artificially
+ * (prohibited or suspicious activity). Matched sentence by sentence, never as isolated words: see fabricated-engagement.ts.
+ */
+export interface FabricatedEngagementVocabulary {
+  /** What is being counted: impressions, views, clicks, traffic, engagement, followers, likes... */
+  metrics: readonly KeywordRule[];
+  /** An automatic means: automatically, a bot, a script, unattended, headless... */
+  automation: readonly KeywordRule[];
+  /** What makes a hit: load, watch, view, click, visit, open, refresh... */
+  actions: readonly KeywordRule[];
+  /** Asking to raise the number: boost, generate, inflate, farm... (not merely to record it). */
+  purposes: readonly KeywordRule[];
+  /** Wording that only makes sense for fake results: fake, artificial, click farm, ad fraud, bot traffic... */
+  explicit: readonly KeywordRule[];
+  /** Asking to look natural to the platform: rotating proxies, avoiding detection, human-like traffic... */
+  evasion: readonly KeywordRule[];
+}
+
 /** What a person is interested in, independent of any platform. */
 export interface InterestProfile {
   name: string;
@@ -60,6 +79,8 @@ export interface InterestProfile {
   unavailableSkills?: readonly KeywordRule[];
   /** Marketing tasks (ads, SEO): not technology even beside a site word, unless the title names a strong skill. */
   offTopicUnlessStrong?: readonly KeywordRule[];
+  /** Prohibited or suspicious work: fabricating views, clicks or impressions. It is a skip, whatever the skills or the pay. */
+  fabricatedEngagement?: FabricatedEngagementVocabulary;
   /** Signs of a large scope (enterprise, marketplace, SaaS...): never a "top match", but not a doubt by themselves. */
   largeScopeSignals?: readonly KeywordRule[];
   /**

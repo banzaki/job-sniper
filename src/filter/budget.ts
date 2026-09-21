@@ -16,6 +16,12 @@ const isFresh = (observedAt: string, now: Date): boolean => {
   return !Number.isNaN(at) && now.getTime() - at <= EXCHANGE_RATE_MAX_AGE_HOURS * 3_600_000;
 };
 
+/** The rate a source published for a currency, from the stored cache, only when observed within 24 hours of `now`. */
+export function freshRate(rates: ExchangeRateLookup | undefined, sourceId: string, currency: string, now: Date): number | null {
+  const cached = rates?.lookup(sourceId, currency);
+  return cached && isFresh(cached.observedAt, now) ? cached.rateToUsd : null;
+}
+
 /** The rate the opportunity itself carries (published by its source when it was collected), with its date. */
 export function ownRate(opportunity: Opportunity): { currency: string; rateToUsd: number; observedAt: string } | null {
   const rate = opportunity.sourceMetadata.exchangeRateToUsd;

@@ -27,8 +27,10 @@ import { findTerms } from './keyword-match.js';
  * "site" and tags are generic); back-end and full-stack work as the central task is a skip when clearly incompatible and a
  * review when ambiguous; a site platform outside the configured skills (Shopify, Webflow, Wix...) follows the same central-skill
  * rule, driven by the profile; 99Freelas takes part in the ladder (a source with no engagement type is freelance).
+ * basic-v10: work whose central goal is to fabricate views, clicks or impressions artificially is a skip (prohibited or
+ * suspicious activity), judged by whole sentences.
  */
-export const FILTER_RULE_VERSION = 'basic-v9';
+export const FILTER_RULE_VERSION = 'basic-v10';
 
 interface CategoryInfo {
   direct: string | null;

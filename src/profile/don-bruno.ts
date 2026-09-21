@@ -188,6 +188,32 @@ export const donBrunoProfile: InterestProfile = {
     { term: 'meta ads', aliases: ['facebook ads', 'instagram ads', 'google ads', 'tiktok ads', 'social media ads', 'ads campaign', 'ad campaigns', 'ad account', 'ad accounts', 'paid acquisition', 'paid social', 'ppc', 'media buying', 'seo', 'search engine optimization'] },
   ],
 
+  // Prohibited or suspicious work: fabricating views, clicks or impressions. Judged by whole sentences (see fabricated-engagement.ts).
+  fabricatedEngagement: {
+    metrics: [
+      { term: 'impressions', aliases: ['impression', 'ad impressions', 'impressoes', 'impressao'] },
+      { term: 'views', aliases: ['view', 'video views', 'page views', 'visualizacoes', 'visualizacao'] },
+      { term: 'clicks', aliases: ['click', 'ad clicks', 'cliques', 'clique'] },
+      { term: 'traffic', aliases: ['trafego'] },
+      { term: 'engagement', aliases: ['engajamento', 'watch time', 'followers', 'seguidores', 'likes', 'curtidas', 'subscribers'] },
+    ],
+    automation: [
+      { term: 'automatically', aliases: ['automatic', 'automated', 'automate', 'unattended', 'bot', 'bots', 'script', 'headless', 'on autopilot', 'without manual intervention', 'automaticamente', 'automatico', 'automatizado', 'robo'] },
+    ],
+    actions: [
+      { term: 'load', aliases: ['loads', 'loading', 'watch', 'watching', 'view', 'viewing', 'click', 'clicking', 'visit', 'visiting', 'open', 'refresh', 'cycle through', 'fire', 'play', 'carregar', 'assistir', 'visualizar', 'clicar', 'visitar', 'abrir'] },
+    ],
+    purposes: [
+      { term: 'boost', aliases: ['increase', 'generate', 'inflate', 'inflating', 'farm', 'farming', 'rack up', 'drive up', 'aumentar', 'gerar', 'inflar'] },
+    ],
+    explicit: [
+      { term: 'fake', aliases: ['fake views', 'fake clicks', 'fake traffic', 'fake impressions', 'artificial', 'artificially', 'inflated', 'click farm', 'view farm', 'ad fraud', 'click fraud', 'bot traffic', 'view bot', 'traffic bot', 'click bot', 'auto clicker', 'autoclicker', 'simulate traffic', 'simulated traffic', 'simulate visits', 'falso', 'falsos', 'falsas', 'fraude de cliques'] },
+    ],
+    evasion: [
+      { term: 'rotating proxies', aliases: ['rotating proxy', 'residential proxies', 'proxy rotation', 'ip rotation', 'rotate ips', 'looking natural', 'looks natural', 'look natural', 'natural looking', 'natural traffic', 'human like', 'avoid detection', 'undetected', 'without being detected', 'anti detect', 'proxies rotativos', 'parecer natural', 'evitar deteccao'] },
+    ],
+  },
+
   // Words that alone do not prove fit: a green needs a specific skill (the other terms) in the title or the start of the description.
   genericSignalTerms: ['responsividade', 'front-end', 'site', 'web', 'sistema', 'desenvolvimento web'],
 

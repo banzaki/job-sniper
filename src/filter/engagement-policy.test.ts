@@ -23,7 +23,7 @@ const job = (over: Partial<Opportunity> = {}): Opportunity =>
 const evaluate = (opportunity: Opportunity) => evaluateOpportunity(opportunity, donBrunoProfile, NOW);
 
 test('the rule version identifies the engagement policy', () => {
-  assert.equal(FILTER_RULE_VERSION, 'basic-v9');
+  assert.equal(FILTER_RULE_VERSION, 'basic-v10');
 });
 
 test('freelance with a compatible location and strong skills is shortlisted, and the type is kept visible', () => {

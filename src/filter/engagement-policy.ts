@@ -7,6 +7,7 @@ import { budgetInUsd, formatUsd } from './budget.js';
 import { findTerms } from './keyword-match.js';
 import { classifyLocation, descriptionRestrictsLocation } from './location.js';
 import { CROWDED_PROPOSALS, VERY_CROWDED_PROPOSALS } from './ranking.js';
+import { fabricatedEngagement } from './fabricated-engagement.js';
 import { DESCRIPTION_LEAD_LENGTH, transactionalCentral, veryShortDeadlineHours } from './scope-risk.js';
 
 export { mainCaveat } from './caveats.js';
@@ -54,7 +55,8 @@ const TEAM_ROLE: readonly RegExp[] = [
  * rules and only lower the outcome, except the last step, which may name an excellent match. Technical compatibility is
  * judged apart from attractiveness:
  *
- *  SKIP  (irrelevant, not technology, out of scope or incompatible; never notified)
+ *  SKIP  (irrelevant, not technology, out of scope, prohibited or incompatible; never notified)
+ *   - prohibited or suspicious activity: the central goal is to fabricate views, clicks or impressions artificially
  *   - full time, part time, internship and contract, and a freelance job that reads like a continuing team role
  *   - a category that is not technology (unless the main task is technical and a specific skill is named up front: then a review);
  *     a main task that is not technical (payroll, story writing, chat support, ads...)
@@ -89,6 +91,11 @@ export function applyEngagementPolicy(
   if (base.decision === 'skip') return base;
 
   const skip = (reason: string): FilterResult => ({ ...base, decision: 'skip', reasons: [reason, ...base.reasons] });
+
+  // Prohibited or suspicious work comes first, whatever the skills, the pay or the category: fabricating views, clicks or impressions.
+  if (fabricatedEngagement(opportunity.title, opportunity.description, profile.fabricatedEngagement)) {
+    return skip('prohibited or suspicious activity: the central goal is to fabricate views, clicks or impressions artificially');
+  }
 
   if (NOT_ALERTED_TYPES.includes(type)) return skip(`employment type: ${TYPE_LABEL[type]} (not sent automatically)`);
 

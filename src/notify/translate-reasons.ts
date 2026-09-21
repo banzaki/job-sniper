@@ -50,6 +50,7 @@ const RULES: { pattern: RegExp; render: (match: RegExpExecArray) => string }[] =
     pattern: /^strong skills appear only as tags, not in the title or description$/,
     render: () => 'as habilidades aparecem só como tags, não no título nem na descrição',
   },
+  { pattern: /^prohibited or suspicious activity: the central goal is to fabricate views, clicks or impressions artificially$/, render: () => 'atividade proibida ou suspeita: o objetivo central é fabricar visualizações, cliques ou impressões artificialmente' },
   { pattern: /^crowded project \((\d+) proposals\): lowers the ranking$/, render: (m) => `concorrência alta (${m[1]} propostas): reduz a posição na fila` },
   { pattern: /^very crowded project \((\d+) proposals\): lowest priority in its group$/, render: (m) => `concorrência muito alta (${m[1]} propostas): última do seu grupo` },
   { pattern: /^(?:fixed budget|hourly rate) of about US\$ ([\d.]+)(\/h)? is below the US\$ (\d+)(\/h)? floor$/, render: (m) => `orçamento baixo: cerca de US$ ${brNumber(m[1]!)}${m[2] ?? ''} (referência: US$ ${m[3]}${m[4] ?? ''})` },

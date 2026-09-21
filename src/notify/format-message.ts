@@ -4,7 +4,8 @@ import { isSafeForAiHelp, aiHelpFor } from './ai-help.js';
 import { basicAttention, CLASSIFICATION, compatibilityLabel, relevantSkills } from './blocks.js';
 import { fitAlert, competitionText, recencyLine, substantiveSummary, type AlertKind, type AlertParts, type Tier } from './layout.js';
 import { excerpt } from './html.js';
-import { describeClientBudget } from './present.js';
+import type { ExchangeRateLookup } from '../storage/exchange-rate-store.js';
+import { displayBudget, type BudgetDisplayOptions } from './budget-display.js';
 
 export { escapeHtml } from './html.js';
 export { recencyLine } from './layout.js';
@@ -28,6 +29,10 @@ export interface FormatOptions {
   kind?: AlertKind;
   /** The moment used to say how long ago something was published. Defaults to the current time. */
   now?: Date;
+  /** The currency the budget is shown in first when a fresh stored rate allows it (default USD). The original is shown below. */
+  displayCurrency?: string;
+  /** The rates a source published, kept in the database (the delivery fills it in). Without them only the original is shown. */
+  rates?: ExchangeRateLookup;
 }
 
 /** Only this much of a description is ever read to build the summary. */
@@ -44,7 +49,7 @@ export function formatOpportunityMessage(opportunity: Opportunity, filter: Filte
   const now = options.now ?? new Date();
   const source = options.sourceLabels?.[opportunity.sourceId] ?? opportunity.sourceId;
   const isJob = opportunity.employmentType !== undefined && opportunity.locationRequirement !== undefined;
-  const facts = isJob ? jobFacts(opportunity, filter) : projectFacts(opportunity, filter);
+  const facts = isJob ? jobFacts(opportunity, filter) : projectFacts(opportunity, filter, { now, ...(options.displayCurrency ? { displayCurrency: options.displayCurrency } : {}), ...(options.rates ? { rates: options.rates } : {}) });
   const summary = substantiveSummary((opportunity.description || opportunity.summary || '').slice(0, SUMMARY_SOURCE_LENGTH), 260);
   const attention = basicAttention(opportunity, filter, now);
   const aiHelp = aiHelpFor(opportunity, isSafeForAiHelp(filter.decision, filter.reasons));
@@ -65,11 +70,13 @@ export function formatOpportunityMessage(opportunity: Opportunity, filter: Filte
 }
 
 /** 99Freelas and a projects marketplace: the client's budget in its own currency, competition, type and skills. */
-function projectFacts(opportunity: Opportunity, filter: FilterResult): { label: string; value: string }[] {
+function projectFacts(opportunity: Opportunity, filter: FilterResult, display: BudgetDisplayOptions): { label: string; value: string }[] {
   const facts: { label: string; value: string }[] = [];
   const budget = opportunity.budget;
-  // The kind is shown on its own line, so the budget itself is described without the "por hora" suffix.
-  facts.push({ label: '💰 Orçamento:', value: budget && budget.kind !== 'unknown' ? describeClientBudget({ ...budget, kind: budget.kind === 'open' ? 'open' : 'fixed' }) : 'não informado' });
+  // The preferred currency first (with "≈") when a fresh stored rate allows it, the original below; hourly keeps its "/h".
+  const shown = displayBudget(opportunity, display);
+  facts.push({ label: '💰 Orçamento:', value: shown.value });
+  if (shown.original !== null) facts.push({ label: '↳ Original:', value: shown.original });
   const competition = competitionText(opportunity.proposalCount);
   if (competition) facts.push({ label: '👥 Concorrência:', value: competition });
   if (budget?.kind === 'fixed') facts.push({ label: '🧰 Tipo:', value: 'preço fixo' });

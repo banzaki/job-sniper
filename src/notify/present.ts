@@ -15,7 +15,7 @@ export { COMPACT_CEILING, formatBrasiliaTime } from './layout.js';
  * draft stay in the database and are read with `npm run analyses`; they are never sent automatically. The effort estimate
  * and the suggested price appear only here, because only here a saved analysis exists.
  */
-export type PresentMode = 'enriched' | 'update' | 'demo';
+export type PresentMode = 'enriched' | 'update' | 'demo' | 'manual_preview';
 
 export interface PresentInput {
   opportunity: Opportunity;
@@ -39,7 +39,7 @@ const CLASSIFICATION: Record<Recommendation, string> = {
   wait: '🕒 AGUARDAR LIBERAÇÃO',
   skip: '🔴 NÃO VALE A PENA',
 };
-const KIND: Record<PresentMode, AlertKind> = { enriched: 'new', update: 'update', demo: 'preview' };
+const KIND: Record<PresentMode, AlertKind> = { enriched: 'new', update: 'update', demo: 'preview', manual_preview: 'manual_preview' };
 
 const number = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 });
 

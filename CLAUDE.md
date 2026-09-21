@@ -60,6 +60,11 @@ terminal reports stay in English.
   Telegram confirms them; a failed send is retried by the next run. The rest of the collection and every older opportunity is saved, never alerted
   automatically and never marked as delivered: the old backlog is only sent by the explicit `npm run backlog -- --send`. Never lift the cap or drain
   the backlog to "catch up" without the owner asking.
+- Personal daily limit: `MAX_TELEGRAM_ALERTS_PER_DAY` (default 10, 1 to 1000) caps only the AUTOMATIC alerts (selected by a collection, later by the agent, and confirmed)
+  per calendar day in America/Sao_Paulo, counted from the persistent delivery records. It is not a ban on using Telegram: a manual preview and a manual real
+  delivery never use it, and reports keep the three counts apart (automatic / manual real / previews). Blue ones keep priority but never exceed it; what is selected keeps its place and goes out on a
+  later day; overflow and backlog are never drained by it. The budget shown in Telegram is converted to `DISPLAY_CURRENCY` only from rates a source itself
+  published and the database stored (24 hours); no external exchange-rate service is ever queried, and the original budget is always kept.
 - A Telegram delivery is marked complete only when every part is confirmed. Never re-send history because
   the presentation changed. Ambiguous confirmations are recorded and reported, never hidden.
 - A real database is migrated only after the migration was validated on a copy; the automatic
@@ -70,6 +75,8 @@ terminal reports stay in English.
 - `npm run dev` — run with tsx (collect, AI if enabled, notify)
 - `npm run collect` — discovery and details only
 - `npm run notify:demo -- --id <id>` — one demonstration delivery of a saved analysis
+- `npm run notify:preview -- --only <source>:<id> [--send]` — a "🧪 PRÉVIA MANUAL" of exactly one stored opportunity; repeatable; touches no flag, queue or production delivery
+- `npm run notify:manual -- --only <source>:<id> [--send]` — the real delivery of exactly one never-delivered opportunity, ignoring only the automatic daily limit
 - `npm run typecheck` — type-check
 - `npm run build` — compile to `dist/`
 - `npm run start` — run compiled output

@@ -62,7 +62,7 @@ test('every currency keeps its own code, amounts are never converted, and hourly
   assert.ok(message(project({ currency: { code: 'EUR', id: 8 }, budget: { minimum: 30, maximum: 250 } })).includes('💰 Orçamento: EUR 30–250'));
   assert.ok(message(project({ currency: { code: 'BRL', id: 9 }, budget: { minimum: 1500, maximum: 2500 } })).includes('💰 Orçamento: R$ 1.500–2.500'));
   const hourly = message(project({ type: 'hourly', currency: { code: 'USD', id: 1 }, budget: { minimum: 15, maximum: 25 } }));
-  assert.ok(hourly.includes('💰 Orçamento: US$ 15–25\n'));
+  assert.ok(hourly.includes('💰 Orçamento: US$ 15–25/h\n'));
   assert.ok(hourly.includes('🧰 Tipo: por hora'));
   assert.ok(message(project({ type: 'hourly', budget: { minimum: 50, maximum: null } })).includes('a partir de US$ 50'));
   assert.ok(message(project({ budget: { minimum: null, maximum: null } })).includes('💰 Orçamento: não informado'));

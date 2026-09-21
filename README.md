@@ -234,7 +234,7 @@ Principal ressalva relevante.
 - **Header** says why the message exists: `🚨 NOVA OPORTUNIDADE` (a real new opportunity), `🧪 PRÉVIA DE FORMATO` (a manual preview only) or
   `🔄 ANÁLISE ATUALIZADA` (an older opportunity whose analysis arrived later). A real opportunity never carries preview wording.
 - **Classification (the commercial ladder):** `🔵 MATCH EXCELENTE` (top match), `🟢 OPORTUNIDADE COMPATÍVEL` (shortlist, or an AI "apply"), `🟡 VALE REVISAR` (review), `🕒 AGUARDAR LIBERAÇÃO` and `🔴 NÃO VALE A PENA` (AI only).
-- **Facts:** the client's budget in its original currency (never converted, never called a suggested price), competition, fixed or hourly, at most
+- **Facts:** the client's budget (see "Budget in the preferred currency" below; never called a suggested price), competition, fixed or hourly, at most
   four relevant skills (only those the filter found, only when there are any), and the compatibility in words (the current deterministic filter:
   high, medium or low). For a jobs source (Remotive) the facts are the pay as published, the type and the required location.
 - **Effort and suggested price appear only when a saved AI analysis exists**, and never otherwise. Nothing is invented.
@@ -264,7 +264,7 @@ format. The notification report lists these cases.
 after sending), the program cannot know. It is recorded as *ambiguous* and reported, and it is retried on the next run,
 so in rare cases one message may appear twice. It is never silently dropped.
 
-`npm run notify:demo -- --id <sourceId:externalId> [--label x]` sends **one** message with the header "🧪 PRÉVIA DE FORMATO" for a
+`npm run notify:demo -- --id <sourceId:externalId> [--label x]` (older, deduplicated by label; the everyday tool is `notify:preview`) sends **one** message with the header "🧪 PRÉVIA DE FORMATO" for a
 saved opportunity (its saved analysis if it has one, otherwise its basic message; no AI, no site access). It is stored as its own delivery, so it
 never marks the real notification, and repeating it with the same label sends nothing new. With `DRY_RUN=true` it only prints and writes nothing.
 
@@ -289,7 +289,40 @@ collect` records the batch too (it sends nothing); `DRY_RUN` renders it and mark
 `npm run backlog` lists it, best first (read only); `npm run backlog -- --send [--limit N]` sends the best N (default the cap, at most 20), obeys
 `DRY_RUN` and the 24-hour data rule, and marks only what Telegram confirms.
 
-## Filter (`basic-v9`)
+**Budget in the preferred currency.** With `DISPLAY_CURRENCY` (default `USD`) and a fresh rate, the budget line shows the converted value first with `≈`
+and the original below, keeping fixed or hourly: `💰 Orçamento: ≈ US$ 6–16` / `↳ Original: INR 600–1.500`, or `≈ US$ 8–13/h` / `↳ Original: INR 750–1.250/h`.
+A budget already in that currency is one line (`US$ 10–20/h`). Without a fresh rate (absent or older than 24 hours) only the original is shown. Only
+rates the source itself published and the database stored in `exchange_rates` are used: **no external exchange-rate service is ever queried**, the
+original amounts are never changed, and the caveat block never repeats the conversion ("Faixa de orçamento atravessa o piso de US$ 8/h.").
+
+**Personal daily limit.** `MAX_TELEGRAM_ALERTS_PER_DAY` (default 10, 1 to 1000; anything else fails with a message naming it) is a global limit of alerts
+**automatic** alerts confirmed per calendar day in `America/Sao_Paulo`: only what a collection selected and Telegram confirmed (later, what the agent
+selects) counts. It is read from the persistent records (`notified_at` of a queue-selected opportunity), so it survives restarts and turns over at
+midnight in Brasília. It is **not** a ban on using Telegram: the owner's manual paths below ignore it. The run limit (`MAX_TELEGRAM_ALERTS_PER_RUN`) and
+the day limit both apply to automatic alerts, the smaller wins; blue ones keep their priority but never exceed the day. Selected alerts are never lost: what the day could not carry stays selected and unmarked and goes out on a
+later day (while its data is fresh). Overflow and backlog are never drained by the new day.
+
+**Three paths to Telegram.**
+
+| Path | Command | Daily limit | Marks `notified_at` | Repeatable |
+| ---- | ------- | ----------- | ------------------- | ---------- |
+| Automatic alert | `npm run dev` (collection) | applies (per run **and** per day) | yes, after Telegram confirms | it is retried until confirmed, never duplicated |
+| Manual preview | `npm run notify:preview -- --only <source>:<id> [--send]` | never used | **no** | any number of times |
+| Manual real delivery | `npm run notify:manual -- --only <source>:<id> [--send]` | ignored (the only rule it ignores) | yes, after Telegram confirms | no: an opportunity already delivered is refused |
+
+- **Exactly one** `<source>:<id>` per command (for example `freelancer:40725242`). A list, a repeated `--only`, `all` or any implicit batch is refused.
+- **Without `--send`** both only print the message: nothing is sent, stored or marked. `--send` is the owner's explicit request and does not depend on
+  `DRY_RUN`, but the Telegram credentials are still required (their absence is reported by variable name).
+- **Preview** carries the mandatory header "🧪 PRÉVIA MANUAL", is stored as a delivery of kind `demo` with a unique reference, never touches `notified_at`,
+  the alert queue or a production delivery, and never calls the AI. It can show any stored opportunity, delivered or not (a preview of data older than the
+  source's limit only prints a warning; nothing else uses that data).
+- **Manual delivery** still requires a deliverable decision (a skip never is), a valid http(s) link, a title, data fresh for its source (24 h for
+  Freelancer.com) and credentials. An opportunity already delivered is not sent again as a new alert: use the preview. If a collection had already
+  selected it, the delivery moves it out of the automatic count.
+- **Counting.** Reports keep three numbers apart: automatic alerts used today (the only ones against the limit), manual real deliveries, and manual previews.
+  `npm run backlog -- --send` and `notify:analyses` are manual too and never use the daily limit.
+
+## Filter (`basic-v10`)
 
 Deterministic, no AI. Every decision carries concrete reasons, the matched terms and the rule
 version. Signals are searched in title, description and skills:
@@ -320,14 +353,18 @@ Freelancer.com projects are freelance by nature and have no location requirement
 tag rules apply to them. Projects from 99Freelas publish no engagement type or location: they are freelance projects, judged by the same category,
 main-task, central-skill, specific-skill and back-end rules (in Portuguese too), with no type or location invented.
 
-**Freelance projects (`basic-v9`).** For every source: Freelancer.com and Remotive publish an engagement type, and a source that publishes none
+**Freelance projects (`basic-v10`).** For every source: Freelancer.com and Remotive publish an engagement type, and a source that publishes none
 (99Freelas) is a freelance projects source. A second step runs after the skill rules and only lowers the result, except the last one, which may name
 an excellent match. **A green (`shortlist`) needs the central task inside the offered skills and a SPECIFIC skill in the title or the start of the
 description (about the first 100 words, 600 characters).** "Responsive", "front-end", "site", "web", "website" and the skill tags are generic and
 prove nothing alone (`genericSignalTerms` in the profile); HTML, CSS, JavaScript, TypeScript, React, WordPress, landing page, API, integration,
 automation, bot and Telegram are specific:
 
-- **`skip`** (irrelevant, closed, not technology, out of scope, incompatible): a category that is not technology; a **main task that is not
+- **`skip`** (irrelevant, closed, not technology, out of scope, prohibited or incompatible): **prohibited or suspicious activity**, when the central goal is to
+  fabricate views, clicks or impressions artificially (for example a service that automatically loads and "watches" ~1,000 banner ads a day to register
+  impressions behind rotating proxies). It is judged by whole sentences (an automatic means asked to boost or generate the metric, a fake or inflated result,
+  or automatic loading/clicking plus a stated daily volume or an effort to look natural), never by an isolated word: tracking pixels, analytics and
+  ad-verification work are ordinary; a category that is not technology; a **main task that is not
   technical** (payroll, story writing, trading, copywriting, translation, data entry, **chat support, customer support, virtual assistant**, and marketing
   such as **ads and SEO** when the title names no strong technical skill); a **central skill the profile does not offer** (another language such as Python
   or Rust, native or cross-platform mobile apps, games, machine learning, DevOps, blockchain, and site platforms such as Shopify, Webflow and Wix...)
@@ -361,8 +398,9 @@ automation, bot and Telegram are specific:
   version 5 migration.
 - **Competition.** Up to 60 proposals is normal; more than 60 is a caveat; more than 150 is still relevant, but goes last of its own group.
 
-Telegram's "Como a IA pode ajudar" is chosen in this order: bug or error, then API or integration, then WordPress, then front-end, then
-automation.
+Telegram's "Como a IA pode ajudar" follows the **central task**: the title decides, and only when the title names none the start of the description
+(about its first 60 words) does; in each, the order is bug or error, then API or integration, then WordPress, then front-end, then automation. A word such
+as "integration", "error" or "fix" further into the text never decides it; with no central signal the block is omitted.
 
 **Persistence (schema version 5).** `top_match` is a new accepted value of `opportunities.filter_decision`; SQLite cannot change a CHECK, so the table is
 rebuilt once, copying every row as it is (`first_seen_at`, `notified_at`, payloads, analyses and deliveries untouched), after the automatic
@@ -382,6 +420,8 @@ When the rule version changes, stored decisions are re-evaluated automatically (
 | `npm run analyses`       | Show stored AI analyses by recommendation (`-- --details`, `-- --proposals`, `-- --messages`); discards drafts of superseded versions |
 | `npm run notify:analyses`| Deliver saved analyses to Telegram; never calls Gemini                   |
 | `npm run notify:demo`    | One demonstration delivery of a saved analysis (`-- --id <id> [--label x]`) |
+| `npm run notify:preview` | A "🧪 PRÉVIA MANUAL" of exactly one stored opportunity (`-- --only <source>:<id> [--send]`); repeatable, marks nothing |
+| `npm run notify:manual`  | The real delivery of exactly one never-delivered opportunity (`-- --only <source>:<id> [--send]`); ignores only the automatic daily limit |
 | `npm run backlog`        | List the owed backlog that automatic alerts never send (read only); `-- --send [--limit N]` sends the best N on purpose (obeys `DRY_RUN`) |
 | `npm run access:refresh` | Re-read one opportunity's detail (`-- --id <sourceId:externalId>`, 1 request) and update only its access |
 | `npm test`               | Offline tests (Node's built-in runner; no network, no Telegram, no Gemini) |
@@ -419,6 +459,8 @@ Version 3 adds `discovery_queue`, `deliveries`, `delivery_parts`, `quota_usage`,
 | `DRY_RUN`                   | `true`                  | `true`: print messages, send nothing, mark nothing. Only an explicit `false` sends |
 | `TELEGRAM_NOTIFY_DECISIONS` | `top_match,shortlist,review` | Which decisions are notified (`top_match`, `shortlist`, `review`); listing `shortlist` also includes `top_match` |
 | `MAX_TELEGRAM_ALERTS_PER_RUN` | `5`                   | Most alerts sent in one run, across all sources (positive integer) |
+| `MAX_TELEGRAM_ALERTS_PER_DAY` | `10`                  | Most AUTOMATIC alerts confirmed per calendar day (America/Sao_Paulo), across runs and sources (1 to 1000, else the run fails); manual preview and manual delivery never use it |
+| `DISPLAY_CURRENCY`         | `USD`                    | Currency the budget is shown in first, when a fresh stored rate allows it (3-letter code, else the run fails) |
 | `AI_ENABLED`                | `false`                 | `true` turns AI analysis on (anything else keeps it off)   |
 | `AI_PROVIDER`               | `gemini`                | Only `gemini` exists; no automatic fallback                |
 | `AI_MODEL`                  | `gemini-3.6-flash`      | The single model used                                      |
@@ -465,6 +507,8 @@ src/
   index.ts                       Entrypoint: config, wiring, three isolated stages, terminal report
   cli/collect.ts                 npm run collect
   cli/notify-demo.ts             npm run notify:demo
+  cli/notify-preview.ts          npm run notify:preview
+  cli/notify-manual.ts           npm run notify:manual
   cli/opportunities.ts           npm run opportunities
   cli/telegram-test.ts           npm run telegram:test
   config.ts                      Environment settings with safe defaults

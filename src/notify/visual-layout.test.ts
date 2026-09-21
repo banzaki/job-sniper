@@ -232,3 +232,27 @@ test('HTML in every external field is escaped, the AI help is a fixed sentence, 
   const link = formatOpportunityMessage(projectOpportunity({ url: 'https://example.test/?a=1&b="2"' }), filter('shortlist'), { now: NOW });
   assert.match(link, /href="https:\/\/example\.test\/\?a=1&amp;b=%22 ?2%22"|href="https:\/\/example\.test\/\?a=1&amp;b=%222%22"/);
 });
+
+// ---------- the sentence follows the CENTRAL task ----------
+const WORDPRESS_HELP = /^Acelerar a montagem das seções, o ajuste do tema e a revisão do conteúdo\./;
+const INTEGRATION_HELP = /^Ajudar a esboçar as chamadas, o tratamento de erros e os testes básicos da integração\./;
+const FRONTEND_HELP = /^Acelerar a estrutura inicial, os componentes e a revisão responsiva\./;
+const later = (text: string): string => `${'Some background about the business and the people behind it, told at length so the request comes late. '.repeat(6)}${text}`;
+
+test('the AI help is chosen by the central task: the title first, then the start of the description; an incidental word later never wins', () => {
+  // The two real alerts: a WordPress site whose brief mentions integration and fixes, and an API job.
+  const wordpress = work('Business Consulting WordPress Site Build', 'I’m launching a new online home for my consulting practice and need a WordPress expert. The site needs a blog, an integration with my newsletter tool, and if anything breaks I will ask you to fix the error quickly.');
+  assert.match(aiHelpFor(wordpress, true)!, WORDPRESS_HELP);
+  assert.match(aiHelpFor(work('Optimize Exchange API & Frontend', 'We are looking for a developer to improve an existing exchange platform built with React. Fix any error you find along the way.'), true)!, INTEGRATION_HELP);
+
+  // A word about something else, further into the text, does not decide the task.
+  assert.match(aiHelpFor(work('Small business website', later('Please integrate the newsletter and fix any error on the contact form. It is a WordPress site.')), true) ?? 'none', /none/, 'nothing is chosen from the far end of the text');
+  assert.match(aiHelpFor(work('A simple HTML website for my shop', later('There is also an integration with a payment page and a bug I saw once.')), true)!, FRONTEND_HELP);
+  assert.match(aiHelpFor(work('Website for my bakery', `A WordPress site with a menu and opening hours. ${later('An integration and an error report are also nice to have.')}`), true)!, WORDPRESS_HELP);
+
+  // Title first: a bug or error named in the title is the task, whatever the platform.
+  assert.equal(aiHelpFor(work('Fix WordPress errors on my site', 'A WordPress site with a white screen.'), true), BUG_HELP);
+  // Inside the start of the description, the usual priority still holds.
+  assert.equal(aiHelpFor(work('Help with my project', 'The checkout shows an error when paying, please fix it in my WordPress store.'), true), BUG_HELP);
+  assert.equal(aiHelpFor(work('Help with my project', later('Please fix the error.')), true), null, 'a bug word only far from the start does not make it a bug job');
+});

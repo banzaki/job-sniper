@@ -6,7 +6,7 @@ const CONTROL = ' Você ainda controla briefing, decisões e entrega.';
 
 /**
  * Deterministic "how AI can help" sentences, chosen from the signals written in the title and description themselves
- * (skill tags are ignored: they are often generic). No AI is called. The sentences describe what AI can speed up in that
+ * (skill tags are ignored: they are often generic), and only from the central task: the title, then the start of the description. No AI is called. The sentences describe what AI can speed up in that
  * kind of work; they never say the person masters the skill. Order matters, the kind that changes the work most first:
  * a bug or error to fix (diagnosis, not building), then an API or integration, then WordPress, then front-end work
  * (named technologies), then automation, and last a plainly stated request to build a site or app. With no clear
@@ -39,11 +39,21 @@ const KINDS: { pattern: RegExp; text: string }[] = [
   },
 ];
 
-/** A sentence for a kind of work that is clearly present, or null: with no clear signal the block is omitted. */
+/** How much of the description counts as the start, where the central task is stated (about the first 60 words). */
+const CENTRAL_TASK_LENGTH = 400;
+
+/**
+ * A sentence for the CENTRAL task, or null: with no clear signal the block is omitted. The kind is chosen from the title, and only
+ * when the title names none from the start of the description. A word such as "integration", "error" or "fix" further into the
+ * text is about something else than the task and never decides it.
+ */
 export function aiHelpFor(opportunity: Pick<Opportunity, 'title' | 'description'>, safe: boolean): string | null {
   if (!safe) return null;
-  const text = normalizeText(`${opportunity.title}\n${opportunity.description}`);
-  return KINDS.find((kind) => kind.pattern.test(text))?.text ?? null;
+  const title = normalizeText(opportunity.title);
+  const fromTitle = KINDS.find((kind) => kind.pattern.test(title));
+  if (fromTitle) return fromTitle.text;
+  const start = normalizeText(opportunity.description.slice(0, CENTRAL_TASK_LENGTH));
+  return KINDS.find((kind) => kind.pattern.test(start))?.text ?? null;
 }
 
 /** Only work with no advanced scope, and whose skills are really named in the text, is safe to describe. */

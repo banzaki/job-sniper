@@ -21,7 +21,7 @@ async function main(): Promise<number> {
     );
     const collected = await collectSources(runs, store, donBrunoProfile);
     // The best new opportunities of this collection are recorded as owed (nothing is sent here); the next full run delivers them.
-    const batch = selectAlertBatch(store, { batchId: runStartedAt, decisions: config.notifyDecisions, cap: config.maxTelegramAlertsPerRun, maxAgeHoursBySource: SOURCE_DATA_MAX_AGE_HOURS, now: new Date() });
+    const batch = selectAlertBatch(store, { batchId: runStartedAt, decisions: config.notifyDecisions, cap: config.maxTelegramAlertsPerRun, dailyCap: config.maxTelegramAlertsPerDay, maxAgeHoursBySource: SOURCE_DATA_MAX_AGE_HOURS, now: new Date() });
     for (const line of describeAlertBatch(batch)) console.log(line);
     return collected.exitCode;
   } finally {

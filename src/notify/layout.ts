@@ -5,11 +5,12 @@ import { escapeHtml, excerpt, safeHttpUrl, visibleLength } from './html.js';
 export const COMPACT_CEILING = 1000;
 
 /** Why the message exists: a real new opportunity, a manual format preview, or the update of an older analysis. */
-export type AlertKind = 'new' | 'preview' | 'update';
+export type AlertKind = 'new' | 'preview' | 'update' | 'manual_preview';
 
 const KIND_HEADER: Record<AlertKind, string> = {
   new: '🚨 NOVA OPORTUNIDADE',
   preview: '🧪 PRÉVIA DE FORMATO',
+  manual_preview: '🧪 PRÉVIA MANUAL',
   update: '🔄 ANÁLISE ATUALIZADA',
 };
 

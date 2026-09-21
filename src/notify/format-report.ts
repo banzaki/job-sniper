@@ -11,6 +11,9 @@ export function printNotifyReport(report: NotifyReport, decisions: string, dryRu
     `  kinds: basic=${report.kinds.basic} ai-enriched=${report.kinds.enriched} ai-update=${report.kinds.aiUpdate} ` +
       `| withheld (AI skip)=${report.suppressedBySkip} | withheld (data too old)=${report.staleWithheld} | held by the per-run limit=${report.heldByLimit}`,
   );
+  if (report.daily) {
+    console.log(`  automatic daily limit ${report.daily.day} (America/Sao_Paulo): ${report.daily.automaticToday} of ${report.daily.cap} used before this run, ${report.daily.remaining} left${report.daily.remaining === 0 ? ' (no more automatic alerts today; what is owed stays unmarked)' : ''} | manual real deliveries ${report.daily.manualDeliveries} | manual previews ${report.daily.manualPreviews} (these never use the limit)`);
+  }
   console.log(
     `  messages: sent=${report.parts.sent} still owed=${report.parts.pending} | incomplete deliveries=${report.incompleteDeliveries}`,
   );

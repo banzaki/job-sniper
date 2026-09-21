@@ -64,7 +64,7 @@ async function main(): Promise<number> {
       dryRun: config.dryRun,
       analysisVersion: ANALYSIS_VERSION,
       candidate: brunoCandidate,
-      format: { sourceLabels: SOURCE_LABELS },
+      format: { sourceLabels: SOURCE_LABELS, displayCurrency: config.displayCurrency },
       maxAgeHoursBySource: SOURCE_DATA_MAX_AGE_HOURS,
       maxAlerts: limit,
       only: picks,

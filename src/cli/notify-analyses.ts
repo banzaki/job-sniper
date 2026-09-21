@@ -44,7 +44,7 @@ async function main(): Promise<number> {
       analysisVersion: ANALYSIS_VERSION,
       only,
       candidate: brunoCandidate,
-      format: { sourceLabels: SOURCE_LABELS },
+      format: { sourceLabels: SOURCE_LABELS, displayCurrency: config.displayCurrency },
     });
     printNotifyReport(report, 'analyses only', config.dryRun);
     return report.failures.length > 0 ? 1 : 0;
