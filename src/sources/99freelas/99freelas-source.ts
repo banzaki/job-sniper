@@ -1,4 +1,4 @@
-import type { Opportunity, OpportunityBudget } from '../../domain/opportunity.js';
+import type { Opportunity, OpportunityAccess, OpportunityBudget } from '../../domain/opportunity.js';
 import type { ListingPage, OpportunitySource } from '../opportunity-source.js';
 import { SourceResponseError } from '../source-errors.js';
 import { BASE_URL, Freelas99Client, type HtmlFetcher } from './99freelas-client.js';
@@ -147,6 +147,7 @@ export function toOpportunity(
     publishedAt: detail.publishedAt ?? listed?.item.publishedAt ?? null,
     discoveredAt: listed?.discoveredAt ?? fetchedAt,
     description: detail.description,
+    access: toAccess(detail, fetchedAt),
     category: detail.category,
     subcategory: detail.subcategory,
     experienceLevel: detail.experienceLevel,
@@ -164,12 +165,33 @@ export function toOpportunity(
       canSubmitProposal: detail.canSubmitProposal,
       visibility: detail.visibility,
       exclusive: detail.exclusive,
+      exclusiveLabel: detail.exclusiveLabel,
+      exclusiveCountdownSeconds: detail.exclusiveCountdownSeconds,
       budgetRaw: detail.budgetRaw,
       minimumValueRaw: detail.minimumValueRaw,
       deadlineAt: detail.deadlineAt,
       publishedRaw: detail.publishedRaw,
       listingDivergence: describeDivergence(detail, listed?.item ?? null),
     },
+  };
+}
+
+/**
+ * The "Projeto Exclusivo" flag says the project "will be available to all professionals in <countdown>",
+ * so until then it is not open to everyone. The anonymous page never says "Premium" outright, so the
+ * flag's own text is kept as-is. publicAt is fetchedAt + countdown only when the countdown parsed
+ * unambiguously; otherwise it stays null. No flag means an ordinary, public project.
+ */
+export function toAccess(
+  detail: Pick<ParsedDetail, 'exclusive' | 'exclusiveLabel' | 'exclusiveCountdownSeconds'>,
+  fetchedAt: string,
+): OpportunityAccess {
+  if (!detail.exclusive) return { kind: 'public', publicAt: null, rawLabel: null };
+  const seconds = detail.exclusiveCountdownSeconds;
+  return {
+    kind: 'premium_only',
+    publicAt: seconds === null ? null : new Date(Date.parse(fetchedAt) + seconds * 1000).toISOString(),
+    rawLabel: detail.exclusiveLabel ?? 'Projeto exclusivo',
   };
 }
 

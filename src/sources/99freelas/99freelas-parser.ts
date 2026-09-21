@@ -34,6 +34,35 @@ export interface ParsedDetail {
   /** True when the page offers a real "send proposal" action, independent of the status code. */
   canSubmitProposal: boolean;
   exclusive: boolean;
+  /** The "Projeto Exclusivo" flag's own text (with its countdown), unchanged. */
+  exclusiveLabel: string | null;
+  /** Seconds until the project opens to everyone, only when the text states it unambiguously. */
+  exclusiveCountdownSeconds: number | null;
+}
+
+const MAX_EXCLUSIVE_COUNTDOWN_SECONDS = 7 * 24 * 3600;
+
+/**
+ * Reads "… disponível para todos os profissionais em 23h52m30s." into seconds.
+ * Anything not matching that shape exactly (missing phrase, unknown units, zero, absurdly
+ * long) returns null: an uncertain countdown must never become a timestamp.
+ */
+export function parseExclusiveCountdownSeconds(label: string | null): number | null {
+  if (!label) return null;
+  const match = /dispon[ií]vel para todos os profissionais em\s+((?:\d+\s*[dhms]\s*)+)\.?\s*$/i.exec(label);
+  const parts = match?.[1];
+  if (!parts) return null;
+
+  const unitSeconds: Record<string, number> = { d: 86_400, h: 3_600, m: 60, s: 1 };
+  const seen = new Set<string>();
+  let total = 0;
+  for (const token of parts.matchAll(/(\d+)\s*([dhms])/gi)) {
+    const unit = (token[2] ?? '').toLowerCase();
+    if (seen.has(unit)) return null;
+    seen.add(unit);
+    total += Number(token[1]) * (unitSeconds[unit] ?? 0);
+  }
+  return total > 0 && total <= MAX_EXCLUSIVE_COUNTDOWN_SECONDS ? total : null;
 }
 
 /**
@@ -129,6 +158,8 @@ export function parseDetail(html: string): ParsedDetail {
   }
   const field = (label: string): string | null => info.get(label) || null;
 
+  const exclusiveFlag = $('.box-project-view-principal .flags img[alt="Projeto exclusivo"]').first();
+  const exclusiveLabel = collapse(exclusiveFlag.attr('title') ?? '') || null;
   const publishedRaw = collapse($('span.icon-published').first().text()) || null;
   const skills = [
     ...new Set(
@@ -161,7 +192,9 @@ export function parseDetail(html: string): ParsedDetail {
       $('a[href^="/project/bid/"]')
         .toArray()
         .some((link) => /enviar proposta/i.test($(link).text())),
-    exclusive: $('.box-project-view-principal .flags img[alt="Projeto exclusivo"]').length > 0,
+    exclusive: exclusiveFlag.length > 0,
+    exclusiveLabel,
+    exclusiveCountdownSeconds: parseExclusiveCountdownSeconds(exclusiveLabel),
   };
 }
 

@@ -1,6 +1,7 @@
 import type { FilterResult } from '../domain/filter-result.js';
 import type { Opportunity } from '../domain/opportunity.js';
 import type { InterestProfile, KeywordRule } from '../profile/interest-profile.js';
+import { normalizeText, padWords } from '../text.js';
 
 export const FILTER_RULE_VERSION = 'basic-v2';
 
@@ -147,18 +148,5 @@ function classifyCategory(opportunity: Opportunity, profile: InterestProfile): C
   };
 }
 
-/** Lowercase, accent-free, punctuation-free ("&" reads as "e"), single-spaced. */
-function normalize(text: string): string {
-  return text
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .replace(/&/g, ' e ')
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim();
-}
-
-/** Surrounding spaces turn a substring test into a whole-word test. */
-function pad(normalized: string): string {
-  return ` ${normalized} `;
-}
+const normalize = normalizeText;
+const pad = padWords;

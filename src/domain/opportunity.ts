@@ -20,8 +20,20 @@ export interface OpportunityBudget {
   max: number | null;
 }
 
+/** Who may act on an opportunity, independent of how well it fits anyone. */
+export interface OpportunityAccess {
+  kind: 'public' | 'premium_only' | 'unknown';
+  /** ISO time the opportunity is estimated to open to everyone; null unless the source made it certain. */
+  publicAt: string | null;
+  /** The source's own wording for the restriction, unchanged. */
+  rawLabel: string | null;
+}
+
+export const UNKNOWN_ACCESS: OpportunityAccess = { kind: 'unknown', publicAt: null, rawLabel: null };
+
 export interface Opportunity extends OpportunitySummary {
   description: string;
+  access: OpportunityAccess;
   category: string | null;
   subcategory: string | null;
   experienceLevel: string | null;

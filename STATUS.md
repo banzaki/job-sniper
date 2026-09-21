@@ -1,6 +1,6 @@
 # STATUS
 
-Last updated: 2026-09-20 (SPEC 003.1 — adaptive pagination, APPROVED by the Tech Lead and committed)
+Last updated: 2026-09-20 (SPEC 004 — AI analysis: implemented, offline-validated, live Gemini acceptance pending; not committed)
 
 ## Implemented
 
@@ -22,7 +22,180 @@ Last updated: 2026-09-20 (SPEC 003.1 — adaptive pagination, APPROVED by the Te
 - **Config**: `DRY_RUN` (default `true`; only an explicit `false` sends), `TELEGRAM_NOTIFY_DECISIONS`
   (default `shortlist,review`), `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` (required only when
   `DRY_RUN=false`; validated before any request is made). `.env.example` updated.
-- Not started: AI/LLM, dashboard, scheduler, application/proposal, second source, Playwright.
+- Not started: dashboard, scheduler, second source, automatic application (auto-apply), login automation, Playwright.
+
+## SPEC 004 — AI analysis + assisted proposal (implemented and validated offline; LIVE Gemini acceptance pending)
+
+**Status:** code, migration and offline validation are complete. The live Gemini acceptance has **not**
+been run: it needs `GEMINI_API_KEY` in the local `.env` (never in chat). Not committed; awaiting review.
+
+**Architecture** (`src/ai/`): provider-independent `OpportunityAnalyzer { id, model, analyze(input) }`;
+`GeminiAnalyzer` over plain `fetch` (key in the `x-goog-api-key` header, one model, no tools/grounding,
+no fallback); `prompt.ts`; `analysis-output.ts` (strict JSON validation, truthfulness guard, skill
+reconciliation, access rules); `analysis-batch.ts` (newest first, ≤ 20, sequential, partial progress kept).
+Domain: `MatchAnalysis` and `ProposalDraft` (`src/domain/match-analysis.ts`). New `CandidateProfile`
+(`src/profile/`): the SPEC assumed one existed, but only the interest profile did, so it was created.
+
+**Schema v2** (migration is `CREATE … IF NOT EXISTS`, idempotent, never touches opportunity rows; a copy
+`data/job-sniper.pre-v2.db` is made once before the first upgrade of a v1 file):
+`analyses` (PK `source_id, external_id, analysis_version`; `status success|failed`; provider, model, score,
+confidence, `recommendation` (final) and `model_recommendation`, `result_json`, `error_message` (trimmed,
+secret-free), `attempts`, `notified_at`) and `proposal_drafts` (same PK; `language`, `body`, `status
+draft|approved|submitted|discarded`). Pending = open opportunities with no success for the version;
+failed rows stay pending. A forced re-analysis replaces the result but keeps `notified_at`.
+
+**Prompt and schema decisions:** `ANALYSIS_VERSION = ai-v1` (bump to re-analyze). The model returns score,
+confidence, `apply|review|skip` (never `wait`), fit, matched/missing skills, risks, client questions, effort
+range, complexity, BRL price range + rationale, proposal language and text. Opportunity text is one JSON
+document declared untrusted; the URL and the access restriction are deliberately not sent (restrictions must
+not influence the technical score). Strict on required fields, enums and numeric ranges; lenient only in
+trimming empty list items and shortening long explanatory text. The proposal is checked locally and rejected
+if it claims mastery, certifications, years of experience, past clients/portfolio (while no experience is
+recorded), mentions an unavailable skill, or contains a link, e-mail, phone, messaging app or off-platform
+payment. Matched skills outside confirmed/learning skills are moved to missing.
+
+**Premium / exclusive handling:** `Opportunity.access { kind public|premium_only|unknown, publicAt, rawLabel }`
+(ISO strings, like the rest of the domain). 99Freelas: the "Projeto Exclusivo" flag → `premium_only`; its
+title text is kept verbatim (also in `sourceMetadata.exclusiveLabel`); `publicAt = fetchedAt + countdown`
+only when "…disponível para todos os profissionais em 23h52m30s" parses unambiguously (else null, never
+guessed). No flag → `public`. **Caveat:** the anonymous page never says "Premium" or mentions invitation
+points; `premium_only` is inferred from "exclusive, available to everyone later". The candidate's 99Freelas
+account is recorded as free, so a compatible restricted opportunity becomes `wait` (score untouched); `review`
+and `skip` are left as the model said. Rows stored before this SPEC read back as `unknown` access.
+
+**Notifications:** independent `analyses.notified_at`. Enriched (first message + AI), AI update (opportunity
+already notified or filtered by basic-v2), basic (no analysis). A clear AI `skip` is neither announced nor does
+it release the basic message. Headers `🟢 APPLY`, `🟡 REVIEW`, `🕒 WAIT — PREMIUM ONLY`, `🔴 SKIP`.
+
+**Commands:** `npm run ai:analyze` (`-- --limit N`, `-- --only <sourceId:externalId>`, `-- --force`),
+`npm run analyses` (`-- --proposals`, `-- --messages`, read-only). Neither contacts 99Freelas. With
+`AI_ENABLED` off they are valid no-ops; with `DRY_RUN=true` they only list what would be analyzed.
+
+**Validation done (no Gemini contacted):**
+- `npm test`: 164 tests, all pass (was 40). New coverage: valid analysis; invalid JSON; score out of range;
+  each missing field; timeout; 429; one bounded retry; no fallback (single model URL, no tools); 20-item batch
+  limit; partial progress after quota; failures stay pending; same version not repeated; new version eligible;
+  cancelled/closed skipped; premium+free → wait; public stays apply; uncertain countdown → no `publicAt`;
+  proposal truthfulness; prompt injection; notification deduplication; migration preserving rows and
+  `notified_at`. Mutation check: breaking the `wait` rule, the analysis notification mark and the open-status
+  filter made 6 tests fail; reverted.
+- Fake-provider run on a **copy** of the real database: v1→v2, 27 rows and 7 `notified_at` identical, backup
+  made, batch of 20 (eligible 27, 7 left pending), 2 apply / 18 skip from the fake, 2 AI updates rendered,
+  `notified_at` untouched by the dry-run.
+- Real database migrated by `npm run analyses`: `user_version` 1 → 2, all 27 opportunity rows identical to the
+  backup column by column (payload included), 7 `notified_at` preserved, `analyses`/`proposal_drafts` empty.
+
+**Live acceptance attempt (Tech Lead audit):** `npm run ai:analyze -- --only 99freelas:785772` with
+`AI_MODEL=gemini-3.8-flash` (set for that command only; the code default is still `gemini-3.6-flash`).
+Two runs, each 2 HTTP requests (the request and its single bounded retry): every response was
+**HTTP 503, "This model is currently experiencing high demand"**. Only a 503 was observed, with no explicit
+authentication error; that is **not** evidence that the key or the integration work (correction of an earlier
+note that wrongly said the key was accepted). Nothing was persisted as a success; one `failed` row exists (`attempts=2`, provider gemini,
+model gemini-3.8-flash, trimmed secret-free message, no score, no proposal) and the opportunity stays
+pending. No model fallback was attempted, as designed. The default model is therefore unchanged.
+`AnalyzerStats` (request count and last HTTP status, no headers) was added to print this evidence.
+
+**Live acceptance with `gemini-3.6-flash` (explicitly authorized, model set for that command only): SUCCESS.**
+`npm run ai:analyze -- --only 99freelas:785772`: 1 HTTP request, status 200, provider gemini, model and
+reported modelVersion `gemini-3.6-flash`. Result: `apply`, 95/100, confidence high, effort 15-25 h, medium
+complexity, R$ 800-1500, proposal draft in pt-BR (683 chars). The local validation passed (0 truthfulness
+violations; ranges valid; matched skills all in the profile). Persisted: 1 `analyses` row (`success`,
+`attempts=3`, counting the earlier failed attempts) and 1 `proposal_drafts` row (`draft`); the earlier
+`failed` row was replaced by the success. A failed analysis stays eligible (it was: status failed,
+recommendation null, position 1 of 27) and a provider error never becomes `skip`. Re-running the same
+command without `--force`: eligible 0, **0 requests to Gemini**, no new rows.
+
+**This result is PROVISIONAL.** The candidate profile is still provisional: the 11 "confirmed" skills come
+only from the interest list approved for SPEC 002 (interest is not competence) and were labeled "confirmed"
+by the implementer, not by Don Bruno. Do not use the generated proposal until Don reviews
+`src/profile/bruno-candidate.ts`. Observation: the draft says "Garantirei um carregamento rápido…"
+(a guarantee); the local guard does not catch promise verbs and could be extended.
+
+**Adjustments after the acceptance (Tech Lead request, `gemini-3.6-flash` kept):**
+1. **Profile:** the 11 skills inferred only from interests are now `unverified` (interest kept via `interest: true`
+   and an `evidence` note), no longer "confirmed". They were NOT turned into `unavailable`. React stays `learning`.
+   No skill is `confirmed` until Don Bruno says so.
+2. **Analyzer:** interest, confirmed and unverified are separate. The prompt has `confirmedSkills`,
+   `unverifiedSkills`, `learningSkills` and `unavailableSkills`. Locally, `apply` is only kept when at least one
+   skill matched and every matched skill is confirmed; otherwise it becomes `review`, the raw model
+   recommendation is kept in `modelRecommendation`, `verification` names the unverified skills, and the note is
+   the first risk. `wait` now requires a verified match. The score is documented and shown as a technical-fit
+   rating, "not a success probability".
+3. **Versioning:** the effective analysis version is now the prompt version plus a profile fingerprint
+   (`ai-v2+p<8 hex>`; currently `ai-v2+p5319dcd3`). A relevant profile change (skill or level, scope note,
+   interest flag, recorded experience, account capability) re-opens every stored opportunity even with the same
+   prompt; evidence wording and ordering do not. Earlier analyses stay as history under their old version. Drafts
+   from older versions are set to `discarded` (text kept; approved/submitted untouched), on every `dev`,
+   `ai:analyze` and `analyses` run. The analysis and proposal made for 99freelas:785772 under the earlier profile
+   were invalidated this way (the row `ai-v1` is history; the draft is `discarded`).
+4. **Access:** new `npm run access:refresh -- --id <sourceId:externalId>` re-reads one detail page (1 request) and
+   updates only `access` (+ `sourceMetadata.accessCheckedAt`). A passed `publicAt` never makes an opportunity
+   public: it becomes access status `unknown` ("verify availability"), and messages say "Verify availability
+   before applying". For 785772 the fresh read still shows "Projeto Exclusivo … em 19h27m25s": `premium_only`,
+   `publicAt` 2026-09-21T19:37:02Z (estimate), checked 2026-09-21T00:09Z.
+5. **Prompt and guard:** no absolute guarantees of performance or outcomes; performance depends on hosting, media,
+   third-party scripts and how it is measured, so the model should name what must be defined. The local guard now
+   also rejects guarantees ("garanto", "garantirei", "prometo", "100%", "sem erros/falhas", "com certeza") and
+   first-person competence assertions ("tenho experiência", "domino", "sou proficiente").
+
+Validation: 205 tests pass (was 165), typecheck and build pass. Mutation check (removing the review cap, the
+guarantee guard, the passed-time rule and the profile level in the fingerprint) made 15 tests fail; reverted.
+The `gemini-3.6-flash` result for 785772 above is superseded: it must be redone after the profile is reviewed.
+
+**Acceptance round (declared profile, `gemini-3.6-flash`, analysis version `ai-v3+pfc05c365`):**
+- **Profile:** Don's declared context is recorded (`declaredContext`: beginner working with guidance and AI; took
+  part in configuring and validating Job Sniper; has not yet published a complete landing page; competences not
+  confirmed by inference). Levels unchanged (no skill confirmed). It is part of the fingerprint and is not
+  citable experience.
+- **`apply`→`review` rule found incomplete and fixed.** Before: only the skills the model listed as *matched* were
+  checked, so one confirmed skill released `apply` even with an essential skill unverified, omitted or outside the
+  profile (demonstrated: 3 of 4 cases released `apply`). Now the model must list `essentialSkills` and `apply`
+  stands only if there is at least one and ALL are confirmed; unverified, learning, unavailable or absent essential
+  skills block it, are shown in `verification`, and confidence is capped at `medium`. Prompt version `ai-v3`.
+- **785772 re-analyzed:** `review`, 55/100, confidence low; essential skills unverified/not covered stated in the
+  fit text, risks and verification; premium access kept separate (actionability `restricted`, opening estimated
+  2026-09-21T19:37Z; the proposal does not mention it and the score/recommendation were not driven by it);
+  proposal 728 chars, no invented experience, no guarantee verbs, no links/contacts (guard: 0 violations).
+- **Batch:** the same run stopped by quota. 10 successes (785772 review; 785771, 785770, 785768, 785766, 785761,
+  785758, 785757, 785755, 785754 skip), 3 failures (785765, 785762, 785760: the local guard rejected the proposal),
+  17 still pending, stop reason `quota-exhausted` (HTTP 429; no retry, no other model). Note: `.env` had
+  `AI_MAX_ANALYSES_PER_RUN=1`, which capped one `--limit 19` run to a single analysis; the later run set it to 20
+  for that command only. `.env` also has `AI_MODEL=gemini-3.8-flash`, overridden per command.
+- **Repeat over the same 10 IDs:** 0 requests to Gemini for each, no new rows; database: 10 success + 3 failed, no
+  duplicate (id, version), old `ai-v1` result kept as history with its draft `discarded`.
+- **Telegram:** the one eligible analysis (785772, `review`) was NOT sent. Every call to the Bot API returned
+  HTTP 404 "Not Found" (also `telegram:test`), which points to an invalid or revoked token in `.env`. Nothing was
+  marked as notified; the message was rendered in dry-run instead. Duplicate notifications: none possible so far.
+- **Guard false positives suspected:** 3 of 11 proposals were rejected for "link/e-mail/phone" and/or "mastery".
+  The phone pattern may match numeric price ranges such as "800 - 1.500"; the stored failure text does not keep the
+  proposal, so this is a hypothesis to check before the next batch.
+- New: `npm run notify:analyses -- --only <ids>` announces only the AI analyses of the given opportunities.
+
+**Follow-up (delivery of the persisted analysis, no Gemini calls):**
+- Effective configuration (loaded by the program, nothing preset in the shell): model `gemini-3.6-flash`, limit 20,
+  `DRY_RUN=false` (real sending), Telegram token and chat id present.
+- Telegram: `getMe` with the value in `.env` returned HTTP 404. Diagnosis by structure only (no values printed):
+  the `TELEGRAM_BOT_TOKEN` value has 57 characters and 3 colon-separated parts: a stray 10-digit prefix
+  (not the chat id) followed by the real `<bot id>:<secret>`. In memory, `getMe` with the last two parts returned
+  HTTP 200, ok, bot `DonBrunoJobSniperBot`. Configuration loading is correct; the value in `.env`
+  must lose the leading `<10 digits>:`. Sending was stopped; nothing was sent or marked; `.env` was not touched.
+  The program now validates the token format (`requireTelegramCredentials`) and fails fast with an error that
+  reports only the number of colon parts and the length, never the value.
+- Guard false positives were reproduced offline: `R$ 800 - 1.500` and `2026-09-21` were blocked as "phone".
+  Fixed narrowly: amounts in reais and dates are blanked before phone detection, and phones are detected by real
+  formats (+country, (area) number, area + number, 0800, 10-13 digit runs, local xxxx-xxxx). All 8 phone formats,
+  links, e-mail, messaging apps and off-platform payment stay blocked, and a phone cannot hide inside an amount or
+  date (a test caught and led to fixing one such bypass). 247 tests pass.
+
+**Still pending:** Don removes the stray prefix from `TELEGRAM_BOT_TOKEN` in `.env`; then
+`npm run notify:analyses -- --only 99freelas:785772` (once, and again to confirm zero resends); retry of the 17
+pending and the 3 failed after the quota resets (the 3 failures were produced under the old guard); Don's review of
+the candidate profile; Tech Lead review. No application was made.
+
+**Skill levels need the owner's confirmation:** `src/profile/bruno-candidate.ts` derives confirmed/learning/
+unavailable skills from the approved interest profile (React = learning/basic; native mobile, private AI,
+DevOps, blockchain, telephony… = unavailable). No experience, clients, years or certifications are recorded,
+so none may be claimed. Proposals are only as truthful as this file.
 
 ## SPEC 003.1 — Adaptive pagination and discovery depth (approved)
 
@@ -198,8 +371,11 @@ from earlier runs are notified (not only those discovered in the current run).
 
 ## Blockers / risks
 
-- No blockers. SPEC 003 is closed (commit `b0495bc`); SPEC 003.1 is approved and committed
-  (`feat: add adaptive opportunity discovery`).
+- SPEC 003 is closed (`b0495bc`); SPEC 003.1 is approved and committed (`157df4c`).
+- **SPEC 004 is waiting on a human step:** put `GEMINI_API_KEY` (and `AI_ENABLED=true`) in the local `.env`
+  for the live Gemini acceptance. Until then nothing has called Gemini.
+- AI limits to keep in mind: free-tier quotas are set by Google and can change; a 429 ends the run's batch.
+  The proposal guard is intentionally blunt and may reject a harmless proposal (it is retried next run).
 - `data/job-sniper.db` holds real data from the live site (git-ignored).
 - **Secret hygiene:** at closing time the working copy of `.env.example` (a tracked file) contained
   a bot token-like value. It was never committed (history and HEAD checked); the SPEC 003 commit
@@ -209,4 +385,5 @@ from earlier runs are notified (not only those discovered in the current run).
 
 ## Next authorized mission
 
-**SPEC 004 — AI + analysis + assisted proposal.** Not started; awaiting authorization.
+**SPEC 004 — AI + analysis + assisted proposal.** Implemented; live Gemini acceptance and Tech Lead review
+pending. Nothing further (dashboard, scheduler, second source, auto-apply) has been started.

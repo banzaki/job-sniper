@@ -1,10 +1,18 @@
-import { mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { constants, copyFileSync, existsSync, mkdirSync } from 'node:fs';
+import { basename, dirname, extname, join } from 'node:path';
 import { DatabaseSync, type SQLOutputValue, type StatementSync } from 'node:sqlite';
 import type { FilterResult } from '../domain/filter-result.js';
-import { opportunityId, type Opportunity, type OpportunityKey } from '../domain/opportunity.js';
+import {
+  opportunityId,
+  UNKNOWN_ACCESS,
+  type Opportunity,
+  type OpportunityAccess,
+  type OpportunityKey,
+} from '../domain/opportunity.js';
+import { ANALYSIS_SCHEMA, AnalysisStore } from './analysis-store.js';
 
-const SCHEMA_VERSION = 1;
+/** 1: opportunities. 2: adds analyses and proposal_drafts (opportunity rows are never touched). */
+const SCHEMA_VERSION = 2;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS opportunities (
@@ -53,6 +61,8 @@ export class OpportunityStore {
   private readonly countStatement: StatementSync;
   private readonly updateFilterStatement: StatementSync;
   private readonly markNotifiedStatement: StatementSync;
+  /** AI analyses and proposal drafts, on the same connection. */
+  readonly analyses: AnalysisStore;
 
   /** Opens (creating the folder and file when missing) the database at `path`. */
   constructor(path: string) {
@@ -61,7 +71,8 @@ export class OpportunityStore {
     }
     this.db = new DatabaseSync(path);
     try {
-      this.migrate();
+      this.migrate(path);
+      this.analyses = new AnalysisStore(this.db);
       this.hasStatement = this.db.prepare(
         'SELECT 1 AS present FROM opportunities WHERE source_id = ? AND external_id = ?',
       );
@@ -135,8 +146,11 @@ export class OpportunityStore {
     if (!row) return null;
 
     const id = opportunityId(key);
+    const opportunity = parseObject<Opportunity>(column(row, 'payload_json', id), 'payload_json', id);
+    // Rows stored before access rules existed have no "access": their restriction is simply unknown.
+    if (!opportunity.access) opportunity.access = { ...UNKNOWN_ACCESS };
     return {
-      opportunity: parseObject<Opportunity>(column(row, 'payload_json', id), 'payload_json', id),
+      opportunity,
       filter: {
         decision: column(row, 'filter_decision', id) as FilterResult['decision'],
         reasons: parseObject<string[]>(column(row, 'filter_reasons_json', id), 'filter_reasons_json', id),
@@ -167,16 +181,30 @@ export class OpportunityStore {
     );
   }
 
-  /** Keys with one of the given decisions that were never notified, oldest first. */
-  listPendingNotification(decisions: readonly FilterResult['decision'][]): OpportunityKey[] {
+  /**
+   * Keys with one of the given decisions that were never notified, oldest first. With `analysisVersion`,
+   * opportunities the AI judged a clear skip for that version are left out (not worth a message).
+   */
+  listPendingNotification(
+    decisions: readonly FilterResult['decision'][],
+    analysisVersion?: string,
+  ): OpportunityKey[] {
     if (decisions.length === 0) return [];
     // Only "?" placeholders are generated; the decision values are bound as parameters.
     const placeholders = decisions.map(() => '?').join(', ');
+    const notSkippedByAi = analysisVersion
+      ? `AND NOT EXISTS (
+           SELECT 1 FROM analyses a
+           WHERE a.source_id = o.source_id AND a.external_id = o.external_id
+             AND a.analysis_version = ? AND a.status = 'success' AND a.recommendation = 'skip')`
+      : '';
     return this.readKeys(
-      `SELECT source_id, external_id FROM opportunities
-       WHERE notified_at IS NULL AND filter_decision IN (${placeholders})
-       ORDER BY first_seen_at, id`,
+      `SELECT o.source_id, o.external_id FROM opportunities o
+       WHERE o.notified_at IS NULL AND o.filter_decision IN (${placeholders})
+       ${notSkippedByAi}
+       ORDER BY o.first_seen_at, o.id`,
       ...decisions,
+      ...(analysisVersion ? [analysisVersion] : []),
     );
   }
 
@@ -198,6 +226,21 @@ export class OpportunityStore {
         );
       }
     });
+  }
+
+  /**
+   * Replaces only the access information of a stored opportunity (and records when it was checked).
+   * Nothing else changes: not the filter result, first_seen_at or notified_at.
+   */
+  updateAccess(key: OpportunityKey, access: OpportunityAccess, checkedAt: string): boolean {
+    const result = this.db
+      .prepare(
+        `UPDATE opportunities
+         SET payload_json = json_set(payload_json, '$.access', json(?), '$.sourceMetadata.accessCheckedAt', ?)
+         WHERE source_id = ? AND external_id = ?`,
+      )
+      .run(JSON.stringify(access), checkedAt, key.sourceId, key.externalId);
+    return Number(result.changes) === 1;
   }
 
   /** Marks an opportunity as notified. Returns false when it was missing or already notified. */
@@ -222,7 +265,12 @@ export class OpportunityStore {
     }));
   }
 
-  private migrate(): void {
+  /**
+   * Brings the database to SCHEMA_VERSION. Every statement is CREATE ... IF NOT EXISTS, so it is safe to
+   * repeat and it never modifies existing opportunity rows. An existing version-1 file is copied once
+   * (next to it, as "<name>.pre-v2.<ext>") before the first upgrade.
+   */
+  private migrate(path: string): void {
     const row = this.db.prepare('PRAGMA user_version').get();
     const version = typeof row?.user_version === 'number' ? row.user_version : 0;
     if (version > SCHEMA_VERSION) {
@@ -230,7 +278,15 @@ export class OpportunityStore {
         `Database schema version ${version} is newer than this program supports (${SCHEMA_VERSION}).`,
       );
     }
-    this.db.exec(SCHEMA);
+    if (version === 1 && path !== ':memory:') {
+      const extension = extname(path);
+      const backup = join(dirname(path), `${basename(path, extension)}.pre-v2${extension}`);
+      if (!existsSync(backup)) copyFileSync(path, backup, constants.COPYFILE_EXCL);
+    }
+    this.transaction(() => {
+      this.db.exec(SCHEMA);
+      this.db.exec(ANALYSIS_SCHEMA);
+    });
     if (version < SCHEMA_VERSION) {
       this.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
     }

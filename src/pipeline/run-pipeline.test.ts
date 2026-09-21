@@ -24,6 +24,7 @@ function opportunity(id: string): Opportunity {
   return {
     ...summary(id),
     description: 'Ajuste de landing page em HTML e CSS',
+    access: { kind: 'public', publicAt: null, rawLabel: null },
     category: 'Web, Mobile & Software',
     subcategory: 'Desenvolvimento Web',
     experienceLevel: null, skills: [], budget: null, proposalCount: 1, interestedCount: 1,

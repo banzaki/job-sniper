@@ -79,6 +79,63 @@ export function loadConfig(
   };
 }
 
+export interface AiConfig {
+  enabled: boolean;
+  provider: string;
+  model: string;
+  apiKey: string | null;
+  /** Analyses attempted per run, 1-20. */
+  maxAnalysesPerRun: number;
+}
+
+export const DEFAULT_AI_PROVIDER = 'gemini';
+export const DEFAULT_AI_MODEL = 'gemini-3.6-flash';
+export const DEFAULT_AI_MAX_ANALYSES_PER_RUN = 20;
+/** Analyses are batched in groups of at most this many. */
+export const AI_MAX_ANALYSES_LIMIT = 20;
+
+/**
+ * AI settings, read separately from the rest so a typo here can never break commands that do not use AI.
+ * While AI_ENABLED is not exactly "true" nothing else is validated. When enabled, an unsupported
+ * provider or an invalid AI_MAX_ANALYSES_PER_RUN fails with a ConfigError naming the variable.
+ * The API key is only required when a real request is about to be made (see requireGeminiKey).
+ */
+export function loadAiConfig(
+  env: NodeJS.ProcessEnv = process.env,
+  warn: (message: string) => void = console.warn,
+): AiConfig {
+  const rawEnabled = env.AI_ENABLED?.trim().toLowerCase();
+  if (rawEnabled && rawEnabled !== 'true' && rawEnabled !== 'false') {
+    warn('Ignoring invalid AI_ENABLED value; AI stays disabled. Use "true" or "false".');
+  }
+  const enabled = rawEnabled === 'true';
+
+  const base = {
+    enabled,
+    provider: env.AI_PROVIDER?.trim().toLowerCase() || DEFAULT_AI_PROVIDER,
+    model: env.AI_MODEL?.trim() || DEFAULT_AI_MODEL,
+    apiKey: env.GEMINI_API_KEY?.trim() || null,
+  };
+  if (!enabled) return { ...base, maxAnalysesPerRun: DEFAULT_AI_MAX_ANALYSES_PER_RUN };
+
+  if (base.provider !== 'gemini') {
+    throw new ConfigError(`AI_PROVIDER "${base.provider}" is not supported. Only "gemini" is available.`);
+  }
+  const maxAnalysesPerRun = positiveInteger(env, 'AI_MAX_ANALYSES_PER_RUN', DEFAULT_AI_MAX_ANALYSES_PER_RUN);
+  if (maxAnalysesPerRun > AI_MAX_ANALYSES_LIMIT) {
+    throw new ConfigError(`AI_MAX_ANALYSES_PER_RUN must be at most ${AI_MAX_ANALYSES_LIMIT}, but got ${maxAnalysesPerRun}.`);
+  }
+  return { ...base, maxAnalysesPerRun };
+}
+
+/** The Gemini API key, required only when a real request is about to be made. Never echoed. */
+export function requireGeminiKey(config: AiConfig): string {
+  if (!config.apiKey) {
+    throw new ConfigError('Missing GEMINI_API_KEY in .env. Fill it in locally, or keep DRY_RUN=true / AI_ENABLED=false.');
+  }
+  return config.apiKey;
+}
+
 /** Telegram credentials, required only when a real message is about to be sent. */
 export function requireTelegramCredentials(config: AppConfig): { botToken: string; chatId: string } {
   const missing: string[] = [];
@@ -87,6 +144,14 @@ export function requireTelegramCredentials(config: AppConfig): { botToken: strin
   if (!config.telegramBotToken || !config.telegramChatId) {
     throw new ConfigError(
       `Missing ${missing.join(' and ')} in .env. Fill them in locally, or keep DRY_RUN=true.`,
+    );
+  }
+  // A malformed token otherwise surfaces as a confusing HTTP 404 from Telegram. Only counts are reported.
+  if (!/^\d{6,}:[A-Za-z0-9_-]{30,}$/.test(config.telegramBotToken)) {
+    const parts = config.telegramBotToken.split(':').length;
+    throw new ConfigError(
+      `TELEGRAM_BOT_TOKEN has an unexpected format: expected "<bot id>:<secret>" with exactly one colon, ` +
+        `found ${parts} colon-separated part(s), ${config.telegramBotToken.length} characters. Check the value in .env.`,
     );
   }
   return { botToken: config.telegramBotToken, chatId: config.telegramChatId };
