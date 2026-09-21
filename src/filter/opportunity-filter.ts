@@ -4,8 +4,12 @@ import type { InterestProfile, KeywordRule } from '../profile/interest-profile.j
 import { normalizeText, padWords } from '../text.js';
 import { applyEngagementPolicy } from './engagement-policy.js';
 
-/** basic-v3: adds the engagement/location policy for job sources; results for project sources are unchanged. */
-export const FILTER_RULE_VERSION = 'basic-v3';
+/**
+ * basic-v3: adds the engagement/location policy for job sources; results for project sources are unchanged.
+ * basic-v4: adds the Freelancer.com non-technology categories to the profile and lets the policy handle a source
+ * that publishes no location; results for 99Freelas are unchanged.
+ */
+export const FILTER_RULE_VERSION = 'basic-v4';
 
 interface CategoryInfo {
   direct: string | null;

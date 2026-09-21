@@ -9,6 +9,7 @@ import { createNotifier } from './notify/create-notifier.js';
 import { printNotifyReport } from './notify/format-report.js';
 import { notifyPending } from './notify/notify-pending.js';
 import { SOURCE_LABELS, SOURCE_NOTES } from './notify/source-labels.js';
+import { SOURCE_DATA_MAX_AGE_HOURS } from './sources/create-sources.js';
 import { collectSources } from './pipeline/collect-sources.js';
 import { reevaluateOutdated } from './pipeline/reevaluate.js';
 import { brunoCandidate } from './profile/bruno-candidate.js';
@@ -87,6 +88,7 @@ async function main(): Promise<number> {
         analysisVersion: ANALYSIS_VERSION,
         candidate: brunoCandidate,
         format: { sourceLabels: SOURCE_LABELS, sourceNotes: SOURCE_NOTES },
+        maxAgeHoursBySource: SOURCE_DATA_MAX_AGE_HOURS,
       });
       printNotifyReport(notification, config.notifyDecisions.join(','), config.dryRun);
       if (notification.failures.length > 0) exitCode = Math.max(exitCode, 1);

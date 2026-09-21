@@ -23,7 +23,7 @@ const job = (over: Partial<Opportunity> = {}): Opportunity =>
 const evaluate = (opportunity: Opportunity) => evaluateOpportunity(opportunity, donBrunoProfile, NOW);
 
 test('the rule version identifies the engagement policy', () => {
-  assert.equal(FILTER_RULE_VERSION, 'basic-v3');
+  assert.equal(FILTER_RULE_VERSION, 'basic-v4');
 });
 
 test('freelance with a compatible location and strong skills is shortlisted, and the type is kept visible', () => {
@@ -124,6 +124,14 @@ test('freelance that reads like a continuing team role is skipped; a defined pro
     assert.equal(result.reasons[0], 'reads like an ongoing team position, not a defined project');
   }
   assert.equal(evaluate(job({ description: 'A one-off landing page in React and JavaScript, delivered in two weeks.' })).decision, 'shortlist');
+});
+
+test('a strong skill that only appears in the skill tags, never in the text, is at most a review', () => {
+  const tagsOnly = evaluate(job({ title: 'German to Dutch translation', description: 'Translate our website copy.', skills: ['HTML', 'Translation'] }));
+  assert.equal(tagsOnly.decision, 'review');
+  assert.ok(tagsOnly.reasons.includes('strong skills appear only as tags, not in the title or description'));
+  assert.equal(mainCaveat(tagsOnly.reasons), 'strong skills appear only as tags, not in the title or description');
+  assert.equal(evaluate(job({ skills: ['HTML'] })).decision, 'shortlist', 'named in the description: fine');
 });
 
 test('project sources are untouched: without an engagement type the result is exactly what the skill rules say', () => {

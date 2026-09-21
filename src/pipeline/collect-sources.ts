@@ -10,6 +10,8 @@ export interface SourceOutcome {
   report: PipelineReport | null;
   /** Set when the whole source failed before producing a report. */
   error: string | null;
+  /** Set when the source was skipped because it cannot run (for example a missing credential). */
+  disabled?: string;
 }
 
 const reason = (error: unknown): string => (error instanceof Error ? error.message : String(error));
@@ -27,7 +29,12 @@ export async function collectSources(
   let exitCode = 0;
   const outcomes: SourceOutcome[] = [];
   for (const run of runs) {
-    if (runs.length > 1) log(`\n-- source: ${run.label} --`);
+    if (runs.length > 1 || run.disabledReason) log(`\n-- source: ${run.label} --`);
+    if (run.disabledReason) {
+      log(`${run.label} is disabled: ${run.disabledReason}`);
+      outcomes.push({ name: run.name, report: null, error: null, disabled: run.disabledReason });
+      continue;
+    }
     try {
       const report = await runPipeline({ source: run.source, store, profile, ...run.limits });
       for (const line of [...describeCollect(report, run.requestCount()), ...run.notes()]) log(line);

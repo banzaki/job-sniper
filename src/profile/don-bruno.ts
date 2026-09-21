@@ -90,6 +90,15 @@ export const donBrunoProfile: InterestProfile = {
     'Customer Service',
     'Human Resources',
     'Finance / Legal',
+    // Categories of the Freelancer.com skill taxonomy that are not technology.
+    'Writing & Content',
+    'Sales & Marketing',
+    'Data Entry & Admin',
+    'Translation & Languages',
+    'Training & Education',
+    'Business, Accounting, Human Resources & Legal',
+    'Product Sourcing & Manufacturing',
+    'Engineering & Science',
   ],
   nonSpecificCategories: ['Outra Categoria', 'Outros', 'Other'],
 };

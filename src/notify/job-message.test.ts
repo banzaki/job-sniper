@@ -203,7 +203,7 @@ test('older, future, missing or unusable dates get no highlight', () => {
   assert.ok(!message(withDate(undefined)).includes('🆕'), 'unknown date: nothing that looks new');
 });
 
-test('a date with an explicit time zone is measured in whole elapsed days', () => {
+test('a date with an explicit time zone is measured in calendar days of Brasília time', () => {
   const opportunity: Opportunity = { ...collected(), publishedAt: '2026-09-19T12:00:00.000Z' };
   assert.equal(recencyLine(opportunity, TODAY), '🆕 Publicada há 2 dias');
   assert.equal(recencyLine({ ...opportunity, publishedAt: '2026-09-21T14:59:00.000Z' }, TODAY), '🆕 Publicada hoje');

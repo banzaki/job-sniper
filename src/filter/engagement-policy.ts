@@ -40,6 +40,7 @@ const TEAM_ROLE: readonly RegExp[] = [
  *  - location that excludes residents of Brazil       -> skip
  *  - location ambiguous, missing, or restricted in the description -> at most review
  *  - a senior title                                   -> at most review
+ *  - a strong skill that appears only in the skill tags, never in the title or description -> at most review
  * Opportunities without an employmentType (sources of projects) are returned untouched.
  */
 export function applyEngagementPolicy(base: FilterResult, opportunity: Opportunity, profile: InterestProfile): FilterResult {
@@ -53,8 +54,9 @@ export function applyEngagementPolicy(base: FilterResult, opportunity: Opportuni
   const outside = outsideCategory(opportunity, profile);
   if (outside) return skip(`category "${outside}" is not technology`);
 
-  const location = classifyLocation(opportunity.locationRequirement);
-  if (location.verdict === 'incompatible') return skip(`location "${location.raw}" excludes residents of Brazil`);
+  // A source that publishes no location requirement at all (a projects marketplace) has nothing to judge here.
+  const location = opportunity.locationRequirement === undefined ? null : classifyLocation(opportunity.locationRequirement);
+  if (location?.verdict === 'incompatible') return skip(`location "${location.raw}" excludes residents of Brazil`);
 
   if (type === 'freelance' && looksLikeTeamRole(opportunity)) return skip('reads like an ongoing team position, not a defined project');
 
@@ -65,16 +67,23 @@ export function applyEngagementPolicy(base: FilterResult, opportunity: Opportuni
   else if (type === 'other') caveats.push(`employment type "${String(opportunity.sourceMetadata.jobTypeRaw ?? 'other')}" is not recognized`);
   else info.push(`employment type: ${TYPE_LABEL[type]}`);
 
-  if (location.verdict === 'unknown') caveats.push('location not stated');
-  else if (location.verdict === 'ambiguous') caveats.push(`location "${location.raw}" is ambiguous for a resident of Brazil`);
-  else info.push(`location "${location.raw}" is compatible with residence in Brazil`);
-  if (location.verdict === 'compatible' && descriptionRestrictsLocation(opportunity.description)) {
+  if (location) {
+    if (location.verdict === 'unknown') caveats.push('location not stated');
+    else if (location.verdict === 'ambiguous') caveats.push(`location "${location.raw}" is ambiguous for a resident of Brazil`);
+    else info.push(`location "${location.raw}" is compatible with residence in Brazil`);
+  }
+  if ((location === null || location.verdict === 'compatible') && descriptionRestrictsLocation(opportunity.description)) {
     caveats.push('description mentions a location or work-authorization requirement');
   }
 
   const title = padWords(normalizeText(opportunity.title));
   const senior = SENIOR_TITLE.find((word) => title.includes(padWords(word)));
   if (senior) caveats.push(`seniority in the title: ${senior}`);
+
+  // Skill tags are often generic ("HTML" on a translation job): a shortlist needs the skill named in the text itself.
+  if (base.decision === 'shortlist' && !strongSkillInText(opportunity, profile)) {
+    caveats.push('strong skills appear only as tags, not in the title or description');
+  }
 
   const decision = caveats.length > 0 && base.decision === 'shortlist' ? 'review' : base.decision;
   return { ...base, decision, reasons: [...caveats, ...info, ...base.reasons] };
@@ -91,6 +100,16 @@ function outsideCategory(opportunity: Opportunity, profile: InterestProfile): st
   return within(profile.excludedCategories);
 }
 
+/** Does the title or description itself name one of the profile's strong skills (aliases and exceptions included)? */
+function strongSkillInText(opportunity: Opportunity, profile: InterestProfile): boolean {
+  const text = padWords(normalizeText(`${opportunity.title}\n${opportunity.description}`));
+  return profile.strongSignals.some((rule) => {
+    let scanned = text;
+    for (const phrase of rule.except ?? []) scanned = scanned.split(padWords(normalizeText(phrase))).join(' ');
+    return [rule.term, ...(rule.aliases ?? [])].some((spelling) => scanned.includes(padWords(normalizeText(spelling))));
+  });
+}
+
 function looksLikeTeamRole(opportunity: Opportunity): boolean {
   const text = normalizeText(`${opportunity.title}\n${opportunity.description}`);
   return TEAM_ROLE.some((pattern) => pattern.test(text));
@@ -105,6 +124,7 @@ export function mainCaveat(reasons: readonly string[]): string | null {
     /^location .*(ambiguous|not stated)|^location not stated$|^description mentions/,
     /^employment type (not stated|".*" is not recognized)/,
     /^seniority in the title/,
+    /^strong skills appear only as tags/,
     /^conflicting or advanced scope|^only weak signals|^no strong technical signal|^status could not be confirmed|is outside the profile|^broad category/,
   ];
   for (const pattern of order) {

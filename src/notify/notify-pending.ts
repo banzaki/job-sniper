@@ -21,6 +21,11 @@ export interface NotifyOptions {
   /** Only to recognize known skill names when showing the verification. */
   candidate?: CandidateProfile;
   format?: FormatOptions;
+  /**
+   * Hours after which the collected data of a source is too old to alert from (Freelancer.com asks for a refresh within
+   * 24 h). An older, still unsent opportunity is withheld and reported, never sent from stale data and never marked.
+   */
+  maxAgeHoursBySource?: Readonly<Record<string, number>>;
   now?: () => Date;
 }
 
@@ -46,6 +51,8 @@ export interface NotifyReport {
   incompleteDeliveries: number;
   /** Basic notifications withheld because the AI judged the opportunity a clear skip. */
   suppressedBySkip: number;
+  /** Unsent opportunities whose data is older than their source allows: withheld, not marked as notified. */
+  staleWithheld: number;
   failures: { id: string; message: string; ambiguous: boolean }[];
   /** Set when a failure made further sending pointless; remaining items stay pending. */
   aborted: string | null;
@@ -83,6 +90,7 @@ export async function notifyPending(options: NotifyOptions): Promise<NotifyRepor
     legacyDeliveries: [],
     incompleteDeliveries: 0,
     suppressedBySkip: 0,
+    staleWithheld: 0,
     failures: [],
     aborted: null,
   };
@@ -152,6 +160,11 @@ export async function notifyPending(options: NotifyOptions): Promise<NotifyRepor
     try {
       const stored = store.get(entry.key);
       if (!stored) continue;
+      const maxAge = options.maxAgeHoursBySource?.[stored.opportunity.sourceId];
+      if (maxAge !== undefined && !(now().getTime() - Date.parse(stored.opportunity.fetchedAt) <= maxAge * 3_600_000)) {
+        report.staleWithheld += 1;
+        continue;
+      }
       const analysis = analysisVersion && entry.analysis ? store.analyses.get(entry.key, analysisVersion) : null;
 
       if (analysis && analysisVersion) {

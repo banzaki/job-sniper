@@ -46,6 +46,10 @@ const RULES: { pattern: RegExp; render: (match: RegExpExecArray) => string }[] =
     pattern: /^reads like an ongoing team position, not a defined project$/,
     render: () => 'parece vaga contínua em equipe, não um projeto com entrega definida',
   },
+  {
+    pattern: /^strong skills appear only as tags, not in the title or description$/,
+    render: () => 'as habilidades aparecem só como tags, não no título nem na descrição',
+  },
   { pattern: /^employment type not stated$/, render: () => 'tipo de contratação não informado' },
   { pattern: /^employment type "(.+)" is not recognized$/, render: (m) => `tipo de contratação "${m[1]}" não reconhecido` },
   { pattern: /^location "(.+)" excludes residents of Brazil$/, render: (m) => `localização "${m[1]}" exclui quem mora no Brasil` },

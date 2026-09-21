@@ -60,6 +60,7 @@ const run = (source: FakeSource, maxDetailsPerRun = 100): SourceRun => ({
   limits: { maxPages: 5, targetNew: 1000, maxDetailsPerRun },
   requestCount: () => 0,
   notes: () => [],
+  disabledReason: null,
 });
 
 test('the same external id in two sources is two different opportunities, each kept under its own source', async () => {

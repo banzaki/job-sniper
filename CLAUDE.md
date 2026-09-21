@@ -47,6 +47,10 @@ terminal reports stay in English.
 - Gemini free tier: at least 15 s between request starts (retries included), a persisted daily counter
   (default 20 per model) reserved before each call, a stored cooldown after HTTP 429. Never bypass these,
   never add a fallback model or provider, and never call Gemini in acceptance or tests without explicit authorization.
+- Freelancer.com (official API only, personal use): the Personal Access Token lives only in the local `.env` and is never printed, logged,
+  put in a URL or shown in an error (only a boolean "loaded" may be reported). It lasts 30 days; a 401 stops that source with a cooldown.
+  Collected data may not be used for an alert once it is 24 hours old (API terms). Multi-user or commercial use needs its own OAuth and a new
+  review of the terms.
 - Remotive (personal use): at most one API request per run and never less than 6 hours between queries (a failed attempt
   counts), a 429/403 ends querying until Retry-After, no per-job requests, no page scraping. Always show Remotive as the
   source with the original link. Its pay text is never converted or called a budget. Read a site's terms of use before

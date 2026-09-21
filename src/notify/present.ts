@@ -72,11 +72,27 @@ export function formatBrasiliaTime(iso: string): string | null {
   return `${part('day')}/${part('month')} às ${part('hour')}h${part('minute')}`;
 }
 
-/** What the client informed as budget, kept apart from the AI's suggested price. */
+const money = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 2 });
+
+/**
+ * An amount or range in ITS OWN currency, never converted: USD as "US$", BRL as "R$", any other by its code ("AUD").
+ * One bound only reads "a partir de" or "até". Without a currency code the amounts are shown bare.
+ */
+export function formatMoney(currency: string, min: number | null, max: number | null): string {
+  const code = currency.trim().toUpperCase();
+  const symbol = code === 'USD' ? 'US$' : code === 'BRL' ? 'R$' : code;
+  const amount = (value: number): string => (symbol === '' ? money.format(value) : `${symbol} ${money.format(value)}`);
+  if (min !== null && max !== null) return min === max ? amount(min) : `${amount(min)}–${money.format(max)}`;
+  if (min !== null) return `a partir de ${amount(min)}`;
+  if (max !== null) return `até ${amount(max)}`;
+  return 'não informado';
+}
+
+/** What the client informed as budget, in the original currency, kept apart from the AI's suggested price. */
 export function describeClientBudget(budget: OpportunityBudget | null): string {
   if (!budget || budget.kind === 'unknown') return 'não informado';
   if (budget.min === null && budget.max === null) return budget.kind === 'open' ? 'em aberto (sem valor informado)' : 'não informado';
-  const range = formatBrl(budget.min ?? budget.max ?? 0, budget.max ?? budget.min ?? 0);
+  const range = formatMoney(budget.currency || 'BRL', budget.min, budget.max);
   return budget.kind === 'hourly' ? `${range} por hora` : range;
 }
 

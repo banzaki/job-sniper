@@ -25,3 +25,14 @@ export class SourceResponseError extends Error {
     this.name = 'SourceResponseError';
   }
 }
+
+/**
+ * The source refused our credentials (HTTP 401): a missing, revoked or expired token. It is not retried in a loop;
+ * the run of that source stops and the message says what to renew. Never carries the credential itself.
+ */
+export class SourceAuthError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SourceAuthError';
+  }
+}

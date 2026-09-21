@@ -1,6 +1,6 @@
 # STATUS
 
-Last updated: 2026-09-21 (SPEC 006 Remotive accepted after the review adjustments (V1 scope, recency line); commit follows. SPEC 005 is 58f8831, SPEC 004 is 4aa3f07. Workana is suspended by its terms of use)
+Last updated: 2026-09-21 (SPEC 007 Freelancer.com implemented and accepted live; SPEC 006 Remotive is cbd1516, SPEC 005 is 58f8831. Workana is suspended by its terms of use)
 
 ## RECON — Workana and Contra (2026-09-20, read-only; no adapter written, no Gemini, no Telegram)
 
@@ -50,6 +50,54 @@ handle in that SPEC: currency (USD bands) in the budget model and message; the l
 listing dates; featured items breaking the newest-first order; reading Workana's terms before enabling a live run.
 Rough effort: Workana about one SPEC of the size of the 99Freelas adapter (client, parser, source, fixtures and about 40 offline
 tests, plus the small currency and budget-carry changes). Contra: at least two to three times that, dominated by unknowns.
+
+## SPEC 007 — Freelancer.com as a project source (implemented and accepted live)
+
+**Status:** official API only (no scraping, no browser, no SDK, no new dependency). Freelancer.com is **off by default**
+(`SOURCES=99freelas,freelancer` and `FREELANCER_OAUTH_TOKEN` in the local `.env`; the token is never printed or logged).
+
+- **Endpoints (confirmed live, 5 RECON requests):** `GET https://www.freelancer.com/api/projects/0.1/projects/active/` with `jobs[]` (skill ids),
+  `from_time` (Unix, last 7 days), `sort_field=submitdate` (newest first; `reverse_sort=true` returned the OLDEST first), `limit`/`offset`,
+  `full_description=true`, `job_details=true`. Skill ids: `GET /api/projects/0.1/jobs/?job_names[]=...`. Detail: `GET /api/projects/0.1/projects/<id>/`
+  (the result is the project itself). Auth header `Freelancer-OAuth-V1`. `or_search_query` did not filter and the default order is not by date.
+- **Fields used:** id, title, seo_url (page URL `https://www.freelancer.com/projects/<seo_url>`), description, status (`active`), type (`fixed`/`hourly`),
+  budget minimum/maximum with `currency.code`, `bid_stats.bid_count`, skills (`jobs` with category), `time_submitted` (Unix = a real instant), language.
+  No location is published, so none is invented. Budgets stay in the original currency (USD, INR, EUR, AUD, ...), never converted, and are shown as
+  "US$ 250–500" / "INR 12.500–37.500" / "R$ ..."; the client's budget is never called a suggested price.
+- **Design:** `freelancer-client.ts` (fetch, token only in a header, errors scrubbed), `freelancer-parser.ts` (normalization), `freelancer-source.ts`
+  (skill ids kept 24 h in `source_cache`, listing by page, detail from the listing or a fresh GET, stored cooldown after 401/403/429 of at
+  least 6 h or Retry-After). No schema change (still v4). `SourceAuthError` for 401 ("the token may have expired; it lasts 30 days").
+- **Selection V1:** freelance technology projects with a defined deliverable. The engagement policy now also applies to Freelancer.com (all
+  its projects are `freelance`): a non-technology category, a continuing-team wording ("long term", "join our team") and a closed project are stored
+  but not alerted; a senior title is at most review; **a strong skill that appears only in the skill tags (never in the title or description) is at most
+  review** (added after the first real run shortlisted 16 of 20 because of generic tags such as HTML on translation and support jobs). Rule
+  version `basic-v4`; on a copy of the real database all 49 stored decisions were unchanged (0 of 29 99Freelas rows).
+- **24-hour data rule (API terms):** alerts are sent only from data collected within 24 h; an older unsent opportunity is withheld, reported
+  (`withheld (data too old)`) and never marked as delivered. Identity, decision and delivery history stay for deduplication. Status is
+  confirmed at collection time only.
+- **Telegram:** one compact message: classification, title, source, "🆕 Publicada hoje / há X dias" (calendar days in Brasília time, up to 7
+  days), budget with currency, fixed or hourly, proposals, up to four skills, one-sentence summary, main caveat, original link.
+- **Recency (also Remotive):** real instants are compared by calendar day in Brasília time; a zone-less date only by its day.
+
+**Live acceptance (2026-09-21, no Gemini):**
+- Requests to Freelancer.com: RECON 5, first collection 2 (skill ids + 20 projects), one detail check 2, repeat collection 1 = 10.
+- First collection: received 20, normalized 20, new 20, known 0, failures 0. Under the first rules: shortlist 16, review 2, skip 2; after the
+  tags-only rule and re-evaluation: **shortlist 9, review 9, skip 2**. Currencies: INR 10 (6 fixed, 4 hourly), USD 7 (4 fixed, 3 hourly), EUR 3; all
+  status open. No project was alerted (18 non-skip are pending; see the risk below).
+- Repeat: 20 known, 0 new, 0 details; the database holds 20 rows and 20 distinct ids for Freelancer.com; the same id under another source is a
+  different opportunity (tested); Remotive and 99Freelas untouched (99Freelas re-checked live: 10 summaries, 1 detail, 2 requests).
+- Telegram: dry-run of three projects, then ONE real preview of `freelancer:40724700` (354 visible characters, with `message_id`, identified
+  "PRÉVIA"); the repeat sent 0. Production flags untouched; `quota_usage` empty; Gemini not called.
+
+**Known limits / risks:**
+- **A first `npm run dev` with Freelancer.com enabled would send the 18 pending alerts (9 shortlist + 9 review) at once**; they become stale (withheld)
+  24 hours after collection. There is no per-run cap on basic notifications.
+- The skill filter is text based: many matches are generic web work with hundreds of proposals and small budgets in INR/USD; the profile has no
+  budget or competition criterion yet.
+- The Personal Access Token lasts 30 days; renewal is manual (see the README).
+- Personal use only. A multi-user or sold service needs its own OAuth application per user (or Freelancer.com's written permission) and a new review
+  of the terms; not implemented.
+- Status is confirmed only at collection time; a project can close before the alert.
 
 ## SPEC 006 — Remotive as the second source (implemented; awaiting review)
 
@@ -595,6 +643,5 @@ from earlier runs are notified (not only those discovered in the current run).
 
 ## Next authorized mission
 
-**SPEC 006 (Remotive)** implemented and accepted live; Tech Lead review pending before its commit. Workana stays suspended by
-its terms of use; Freelancer.com remains the recommended next source (see the RECON section). Nothing further (Contra, dashboard,
-scheduler, auto-apply, interactive buttons) has been started.
+**SPEC 007 (Freelancer.com)** implemented and accepted live. Remotive (006) and Freelancer.com (007) are optional sources, off by default. Workana stays
+suspended by its terms of use. Nothing further (Contra, dashboard, scheduler, auto-apply, interactive buttons, a jobs mode) has been started.

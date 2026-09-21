@@ -15,6 +15,8 @@ export interface AppConfig {
   sources: SourceName[];
   /** Hours between two queries to the Remotive API (at least 6; failed attempts count too). */
   remotiveMinIntervalHours: number;
+  /** Freelancer.com Personal Access Token (valid 30 days); null when unset, which only disables that source. Never printed. */
+  freelancerToken: string | null;
   telegramBotToken: string | null;
   telegramChatId: string | null;
 }
@@ -24,7 +26,7 @@ export const DEFAULT_DATABASE_PATH = './data/job-sniper.db';
 export const DEFAULT_MAX_DETAILS_PER_RUN = 20; // detail requests, shared between new and older pending items
 export const DEFAULT_DISCOVERY_MAX_PAGES = 20; // listing pages, newest first
 export const DEFAULT_DISCOVERY_TARGET_NEW = 100; // new summaries saved to the queue before pagination stops
-export const SOURCE_NAMES = ['99freelas', 'remotive'] as const;
+export const SOURCE_NAMES = ['99freelas', 'remotive', 'freelancer'] as const;
 export type SourceName = (typeof SOURCE_NAMES)[number];
 export const DEFAULT_SOURCES: readonly SourceName[] = ['99freelas'];
 /** The Remotive documentation advises at most 4 queries a day. */
@@ -91,6 +93,7 @@ export function loadConfig(
     notifyDecisions: parseDecisions(env.TELEGRAM_NOTIFY_DECISIONS, warn),
     sources,
     remotiveMinIntervalHours,
+    freelancerToken: env.FREELANCER_OAUTH_TOKEN?.trim() || null,
     telegramBotToken: env.TELEGRAM_BOT_TOKEN?.trim() || null,
     telegramChatId: env.TELEGRAM_CHAT_ID?.trim() || null,
   };

@@ -38,11 +38,32 @@ The stages are isolated: a failure in one never blocks delivering what is alread
 
 ## Sources
 
-`SOURCES` (comma separated) chooses what each run collects: `99freelas` (the default, unchanged), `remotive`, or both. Remotive is
-**off by default**.
+`SOURCES` (comma separated) chooses what each run collects: `99freelas` (the default, unchanged), `remotive`, `freelancer`, or any
+combination. Remotive and Freelancer.com are **off by default**.
 Each source runs with **its own limits** and its own identifiers (`sourceId:externalId`), so one never spends the
 other's budget, and a failure or a block in one is reported without stopping the other, the AI stage or the delivery of
 what is already stored. `npm run collect` and `npm run dev` both use this selection.
+
+**Freelancer.com** (official API, `https://www.freelancer.com/api/projects/0.1/...`; no scraping, no browser, no SDK).
+- Enable with `SOURCES=99freelas,freelancer` and a **Personal Access Token** in the local `.env` (`FREELANCER_OAUTH_TOKEN=`), sent only in
+  the `Freelancer-OAuth-V1` header, never in a URL, a log or an error. Without the token only this source is skipped, with a short
+  message. The token is **valid for 30 days**: on a 401 the source stops, says the token may have expired and is left alone for at
+  least 6 hours (a stored cooldown; 403 and 429 too, or `Retry-After` if longer). Safe renewal: create a new token in your Freelancer.com
+  developer account, replace the value in `.env` yourself (never paste it in chat, commits or screenshots) and run the collection again.
+- Listing: `GET /api/projects/0.1/projects/active/` with `jobs[]` (skill ids), `from_time` (last 7 days), `sort_field=submitdate` (newest
+  first; `reverse_sort=true` would return the OLDEST first), `limit`/`offset` (20 per page, up to 3 pages, further capped by
+  `DISCOVERY_MAX_PAGES`), `full_description` and `job_details`. Skill ids come from `GET /api/projects/0.1/jobs/?job_names[]=...`, looked
+  up from the profile's strong skills and kept 24 hours. Detail: `GET /api/projects/0.1/projects/<id>/`; a project listed in the same run
+  is used as it is, an older one is fetched again. The text search parameter (`or_search_query`) did not filter, so skills are filtered by id.
+- Kept: id, title, page URL, real publication instant (Unix time), status (`active` is open), fixed or hourly budget with its **original
+  currency code** (never converted), number of proposals, skills, language and audit metadata.
+- **Cache rule (API terms):** cached data must be refreshed at least every 24 hours. Alerts are sent only from data collected within 24 hours;
+  an unsent opportunity older than that is withheld and reported (`withheld (data too old)`), never sent from stale data and never marked
+  as delivered. Identity, decision and delivery history stay stored for deduplication. Status is confirmed at collection time only, so a
+  project can close between the collection and the alert.
+- **Personal use versus a service:** the terms allow personal and internal use. A multi-user or sold service needs its own OAuth application
+  per user or Freelancer.com's written permission, cannot share one token, and needs a fresh review of the terms (no redistribution or
+  syndication of API access, no competing with Freelancer.com, deletion of stored data on termination). Not implemented.
 
 **Remotive** (`remotive.com/api/remote-jobs?category=software-dev`, the documented public API; no browser, no page scraping).
 Version 1 looks for **freelance technology projects with a defined deliverable**: full time, part time, internship, ongoing team
@@ -217,6 +238,11 @@ saved analysis (no AI, no site access). It is stored as its own delivery, so it 
 repeating it with the same label sends nothing new. With `DRY_RUN=true` it only prints and writes nothing. An opportunity
 that has no analysis (every Remotive job) is previewed with its basic message, prefixed "🧪 PRÉVIA".
 
+**Projects from Freelancer.com** use one compact message too: classification, title, source, "🆕 Publicada há X dias" (calendar days in
+Brasília time, only up to 7 days), the client's budget in its **original currency** ("US$ 250–500", "INR 12.500–37.500", "R$ ..."; never
+converted), fixed or hourly, number of proposals, up to four skills, a one-sentence summary, the main caveat and the original link. The
+client's budget is never called a suggested price, and there is no score or proposal.
+
 **Jobs from Remotive** are announced with one compact message (at most 1,000 characters) built only from the collected data
 and the basic filter: classification, title, source and company, hiring type, required location, pay **as published** (never
 converted, never called a budget), a one-sentence summary, the main caveat and the original Remotive link. When the publication
@@ -249,7 +275,9 @@ when the text mentions a skill word; a freelance job that reads like a continuin
 "ongoing") is **skipped**; a missing or unrecognized type is at most `review` and never shown as freelance; a location that names only other countries or regions (for example "USA Only") is
 **skipped**; a location that is "Remote" alone, a time zone, "Worldwide except ...", missing, or restricted in the description
 (residence, work authorization) is at most `review`; a senior title is at most `review`. "Worldwide", Brazil, LATAM, South
-America and the Americas are compatible. "Remote" is never read as worldwide. Projects from 99Freelas have no such fields and are evaluated exactly as before.
+`America and the Americas are compatible. "Remote" is never read as worldwide. A strong skill that appears only in the skill **tags** (never in the title or description) is at most `review` for these sources.
+Freelancer.com projects are freelance by nature and have no location requirement, so only the type, category, team-role, seniority and
+tag rules apply to them. Projects from 99Freelas have no such fields and are evaluated exactly as before.
 
 When the rule version changes, stored decisions are re-evaluated automatically (see below).
 
@@ -294,7 +322,8 @@ Version 3 adds `discovery_queue`, `deliveries`, `delivery_parts`, `quota_usage`,
 | `MAX_DETAILS_PER_RUN`       | `20`                    | Max detail requests per run (invalid value → `20`)         |
 | `DISCOVERY_MAX_PAGES`       | `20`                    | Most listing pages read per run (positive integer, else the run fails) |
 | `DISCOVERY_TARGET_NEW`      | `100`                   | Stop paginating after this many **new** summaries were saved (positive integer, else the run fails) |
-| `SOURCES`                   | `99freelas`             | Sources collected per run: `99freelas`, `remotive` or both, comma separated |
+| `SOURCES`                   | `99freelas`             | Sources collected per run: `99freelas`, `remotive`, `freelancer`, comma separated |
+| `FREELANCER_OAUTH_TOKEN`    | —                       | Freelancer.com Personal Access Token (30 days); only the Freelancer source needs it |
 | `REMOTIVE_MIN_INTERVAL_HOURS` | `6`                   | Hours between Remotive queries, at least 6 (read only when `remotive` is enabled) |
 | `DRY_RUN`                   | `true`                  | `true`: print messages, send nothing, mark nothing. Only an explicit `false` sends |
 | `TELEGRAM_NOTIFY_DECISIONS` | `shortlist,review`      | Which decisions are notified                               |
@@ -363,6 +392,7 @@ src/
   sources/source-errors.ts       Blocked / not-found / unusable-response errors
   sources/99freelas/             First adapter: client (transport), parser (HTML), source
   sources/remotive/              Second adapter: JSON API, safe HTML-to-text, persistent cache and interval
+  sources/freelancer/            Third adapter: official API client (token in a header), parser, source with skill-id cache and cooldown
   sources/create-sources.ts      Builds the enabled sources with their own limits
 .env.example                     Configuration template (no secrets)
 STATUS.md                        Current project state

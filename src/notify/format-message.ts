@@ -44,7 +44,10 @@ const PREVIEW_LINE = '🧪 <b>PRÉVIA</b> · não é um alerta novo';
  * compact job layout; the project layout below is unchanged.
  */
 export function formatOpportunityMessage(opportunity: Opportunity, filter: FilterResult, options: FormatOptions = {}): string {
-  if (opportunity.employmentType !== undefined) return formatJobMessage(opportunity, filter, options);
+  if (opportunity.employmentType !== undefined) {
+    // A source that publishes a required location publishes jobs; one that does not is a projects marketplace.
+    return opportunity.locationRequirement !== undefined ? formatJobMessage(opportunity, filter, options) : formatMarketplaceMessage(opportunity, filter, options);
+  }
 
   const source = options.sourceLabels?.[opportunity.sourceId] ?? opportunity.sourceId;
   const category = [opportunity.category, opportunity.subcategory].filter(Boolean).join(' / ') || 'não informada';
@@ -70,6 +73,9 @@ export function formatOpportunityMessage(opportunity: Opportunity, filter: Filte
 }
 
 const DAY_MS = 86_400_000;
+const brasiliaDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' });
+/** YYYY-MM-DD of an instant in Brasília time. */
+const brasiliaDay = (ms: number): string => brasiliaDate.format(new Date(ms));
 /** Age is highlighted only for a publication this recent; older or unknown dates get no highlight. */
 const RECENT_DAYS = 7;
 
@@ -85,12 +91,58 @@ export function recencyLine(opportunity: Opportunity, now: Date): string | null 
   const meta = opportunity.sourceMetadata;
   const day = meta.publishedDay ?? (meta.publishedTimezone === 'not stated' && typeof meta.publishedRaw === 'string' ? meta.publishedRaw.slice(0, 10) : null);
   if (!Number.isNaN(instant)) {
-    days = Math.floor((now.getTime() - instant) / DAY_MS);
+    // A real instant is compared by calendar day in Brasília time, the reader's day: 21 h ago can still be "yesterday".
+    days = Math.round((Date.parse(`${brasiliaDay(now.getTime())}T00:00:00Z`) - Date.parse(`${brasiliaDay(instant)}T00:00:00Z`)) / DAY_MS);
   } else if (typeof day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(day) && !Number.isNaN(Date.parse(`${day}T00:00:00Z`))) {
     days = Math.round((Date.parse(`${now.toISOString().slice(0, 10)}T00:00:00Z`) - Date.parse(`${day}T00:00:00Z`)) / DAY_MS);
   }
   if (days === null || days < 0 || days > RECENT_DAYS) return null;
   return days === 0 ? '🆕 Publicada hoje' : `🆕 Publicada há ${days} ${days === 1 ? 'dia' : 'dias'}`;
+}
+
+const PROJECT_TIERS = [
+  { title: 100, sentence: 220, caveat: 200, skills: 4 },
+  { title: 80, sentence: 150, caveat: 130, skills: 3 },
+  { title: 60, sentence: 100, caveat: 90, skills: 2 },
+] as const;
+
+/**
+ * One compact message for a project of a freelance marketplace: title and source, recency, the client's budget in its
+ * ORIGINAL currency and whether it is fixed or hourly, the number of proposals, a few skills, a one-sentence summary,
+ * the main caveat and the original link. No score, suggested price or proposal: none was produced, and the client's
+ * budget is never called a suggested price.
+ */
+function formatMarketplaceMessage(opportunity: Opportunity, filter: FilterResult, options: FormatOptions): string {
+  const source = options.sourceLabels?.[opportunity.sourceId] ?? opportunity.sourceId;
+  const link = safeHttpUrl(opportunity.url);
+  const caveatReason = mainCaveat(filter.reasons);
+  const recency = recencyLine(opportunity, options.now ?? new Date());
+  const kind = opportunity.budget?.kind;
+  const kindLabel = kind === 'fixed' ? 'preço fixo' : kind === 'hourly' ? 'por hora' : 'não informado';
+  const budget = opportunity.budget && opportunity.budget.kind !== 'unknown' ? describeClientBudget({ ...opportunity.budget, kind: 'fixed' }) : 'não informado';
+
+  for (const tier of PROJECT_TIERS) {
+    const lines: string[] = [];
+    if (options.preview) lines.push(PREVIEW_LINE, '');
+    lines.push(
+      `<b>${DECISION_HEADER[filter.decision]}</b>`,
+      `<b>${escapeHtml(excerpt(opportunity.title, tier.title).text)}</b>`,
+      `Fonte: ${escapeHtml(source)}`,
+      ...(recency ? [recency] : []),
+      `Orçamento do cliente: ${escapeHtml(budget)}`,
+      `Tipo: ${kindLabel}`,
+      `Propostas: ${opportunity.proposalCount ?? 'não informado'}`,
+    );
+    if (opportunity.skills.length > 0) lines.push(`Habilidades: ${escapeHtml(excerpt(opportunity.skills.slice(0, tier.skills).join(', '), 90).text)}`);
+    const summary = firstSentence(opportunity.summary ?? opportunity.description, tier.sentence);
+    if (summary) lines.push('', escapeHtml(summary));
+    if (caveatReason) lines.push('', `⚠️ ${escapeHtml(excerpt(translateReason(caveatReason), tier.caveat).text)}`);
+    if (link) lines.push('', `🔗 <a href="${escapeHtml(link)}">Abrir na ${escapeHtml(source)}</a>`);
+
+    const text = lines.join('\n');
+    if (visibleLength(text) <= COMPACT_CEILING) return text;
+  }
+  throw new Error(`Message exceeds ${COMPACT_CEILING} characters even in its shortest form.`);
 }
 
 /** Progressively tighter limits, used only when the message would exceed the ceiling. */
