@@ -12,7 +12,7 @@ import { findTerms } from './keyword-match.js';
  * basic-v5: a freelance project with more than 150 proposals is skipped and one in a language outside the profile is at
  * most a review; results for 99Freelas are unchanged.
  * basic-v6: for freelance projects, the main task must be technical (a non-technical main task is skipped, an unclear
- * one is at most a review), a budget under the USD floor is skipped, a budget with no reliable USD conversion and a
+ * one is at most a review), a budget range whose top is under the USD floor is skipped, a range that crosses it, a budget with no reliable USD conversion and a
  * project with 61 to 150 proposals are at most a review; results for 99Freelas are unchanged.
  */
 export const FILTER_RULE_VERSION = 'basic-v6';

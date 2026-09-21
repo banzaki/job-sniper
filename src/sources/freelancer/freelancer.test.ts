@@ -357,6 +357,13 @@ test('without the token only the Freelancer source is skipped, with a short mess
   const withToken = loadConfig({ SOURCES: 'freelancer', FREELANCER_OAUTH_TOKEN: `  ${TOKEN}  ` }, quiet);
   assert.equal(withToken.freelancerToken, TOKEN, 'trimmed');
   assert.equal(createSourceRuns(withToken, store)[0]!.disabledReason, null);
+  // Depth is the source's own setting: 5 pages by default, and DISCOVERY_MAX_PAGES (99Freelas) does not touch it.
+  assert.equal(createSourceRuns(withToken, store)[0]!.limits.maxPages, 5);
+  const deeper = loadConfig({ SOURCES: '99freelas,freelancer', FREELANCER_OAUTH_TOKEN: TOKEN, FREELANCER_MAX_PAGES: '8', DISCOVERY_MAX_PAGES: '2' }, quiet);
+  const [legacy, freelancer] = createSourceRuns(deeper, store);
+  assert.equal(freelancer!.limits.maxPages, 8);
+  assert.equal(freelancer!.limits.maxDetailsPerRun, 160);
+  assert.equal(legacy!.limits.maxPages, 2, 'the other source keeps its own limit');
   assert.deepEqual(loadConfig({ SOURCES: '99freelas,remotive,freelancer' }, quiet).sources, ['99freelas', 'remotive', 'freelancer']);
   assert.deepEqual(loadConfig({}, quiet).sources, ['99freelas'], 'off by default');
 });

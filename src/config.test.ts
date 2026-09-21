@@ -121,3 +121,20 @@ test('well-formed Telegram tokens are accepted', () => {
   const token = ['1234567890', 'Q'.repeat(35)].join(':');
   assert.deepEqual(requireTelegramCredentials(loadConfig({ TELEGRAM_BOT_TOKEN: token, TELEGRAM_CHAT_ID: '5' }, quiet)), { botToken: token, chatId: '5' });
 });
+
+test('FREELANCER_MAX_PAGES defaults to 5, accepts 1 to 10, and is read only when the source is enabled', () => {
+  assert.equal(loadConfig({ SOURCES: 'freelancer' }, quiet).freelancerMaxPages, 5);
+  assert.equal(loadConfig({ SOURCES: 'freelancer', FREELANCER_MAX_PAGES: '  ' }, quiet).freelancerMaxPages, 5);
+  for (const pages of [1, 7, 10]) assert.equal(loadConfig({ SOURCES: 'freelancer', FREELANCER_MAX_PAGES: String(pages) }, quiet).freelancerMaxPages, pages);
+  for (const bad of ['0', '11', '-1', '2.5', 'abc']) {
+    assert.throws(
+      () => loadConfig({ SOURCES: '99freelas,freelancer', FREELANCER_MAX_PAGES: bad }, quiet),
+      (error: unknown) => error instanceof ConfigError && error.message.includes('FREELANCER_MAX_PAGES'),
+      bad,
+    );
+  }
+  // Another source's run is never broken by it, and it never changes their limits.
+  const other = loadConfig({ FREELANCER_MAX_PAGES: '99' }, quiet);
+  assert.equal(other.freelancerMaxPages, 5);
+  assert.equal(other.discoveryMaxPages, 20);
+});

@@ -69,6 +69,10 @@ const RULES: { pattern: RegExp; render: (match: RegExpExecArray) => string }[] =
   },
   { pattern: /^fixed budget of about US\$([\d.]+) is below the US\$(\d+) floor$/, render: (m) => `orçamento fixo de cerca de US$${m[1]} abaixo do mínimo de US$${m[2]}` },
   { pattern: /^hourly rate of about US\$([\d.]+)\/h is below the US\$(\d+)\/h floor$/, render: (m) => `valor por hora de cerca de US$${m[1]}/h abaixo do mínimo de US$${m[2]}/h` },
+  {
+    pattern: /^(fixed|hourly) budget range of about US\$(.+?)(\/h)? crosses the US\$(\d+)(\/h)? floor: at most a review$/,
+    render: (m) => `faixa de orçamento (cerca de US$${m[2]}${m[3] ?? ''}) atravessa o mínimo de US$${m[4]}${m[5] ?? ''}: no máximo revisar`,
+  },
   { pattern: /^budget currency "(.+)" has no reliable USD conversion$/, render: (m) => `moeda do orçamento (${m[1]}) sem conversão confiável para dólar` },
   { pattern: /^budget currency not stated: no reliable USD conversion$/, render: () => 'moeda do orçamento não informada' },
   { pattern: /^too many proposals \((\d+)\) for an automatic alert$/, render: (m) => `propostas demais (${m[1]}) para alerta automático` },

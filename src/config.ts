@@ -17,6 +17,8 @@ export interface AppConfig {
   remotiveMinIntervalHours: number;
   /** Most Telegram alerts sent in one run, across all sources; the rest stay pending, unmarked. */
   maxTelegramAlertsPerRun: number;
+  /** Listing pages of 20 projects read from Freelancer.com per run (1 to 10). Only this source reads it. */
+  freelancerMaxPages: number;
   /** Freelancer.com Personal Access Token (valid 30 days); null when unset, which only disables that source. Never printed. */
   freelancerToken: string | null;
   telegramBotToken: string | null;
@@ -33,6 +35,10 @@ export type SourceName = (typeof SOURCE_NAMES)[number];
 export const DEFAULT_SOURCES: readonly SourceName[] = ['99freelas'];
 /** The Remotive documentation advises at most 4 queries a day. */
 export const DEFAULT_REMOTIVE_MIN_INTERVAL_HOURS = 6;
+/** Freelancer.com listing pages per run (20 projects each): default, lowest and highest accepted value. */
+export const DEFAULT_FREELANCER_MAX_PAGES = 5;
+export const MIN_FREELANCER_MAX_PAGES = 1;
+export const MAX_FREELANCER_MAX_PAGES = 10;
 /** Alerts per run: a small, ranked batch instead of a flood. */
 export const DEFAULT_MAX_TELEGRAM_ALERTS_PER_RUN = 5;
 export const DEFAULT_NOTIFY_DECISIONS: readonly FilterDecision[] = ['shortlist', 'review'];
@@ -88,6 +94,10 @@ export function loadConfig(
     ? atLeast(env, 'REMOTIVE_MIN_INTERVAL_HOURS', DEFAULT_REMOTIVE_MIN_INTERVAL_HOURS, DEFAULT_REMOTIVE_MIN_INTERVAL_HOURS)
     : DEFAULT_REMOTIVE_MIN_INTERVAL_HOURS;
 
+  const freelancerMaxPages = sources.includes('freelancer')
+    ? between(env, 'FREELANCER_MAX_PAGES', DEFAULT_FREELANCER_MAX_PAGES, MIN_FREELANCER_MAX_PAGES, MAX_FREELANCER_MAX_PAGES)
+    : DEFAULT_FREELANCER_MAX_PAGES;
+
   return {
     databasePath,
     maxDetailsPerRun,
@@ -98,6 +108,7 @@ export function loadConfig(
     sources,
     remotiveMinIntervalHours,
     maxTelegramAlertsPerRun: positiveInteger(env, 'MAX_TELEGRAM_ALERTS_PER_RUN', DEFAULT_MAX_TELEGRAM_ALERTS_PER_RUN),
+    freelancerMaxPages,
     freelancerToken: env.FREELANCER_OAUTH_TOKEN?.trim() || null,
     telegramBotToken: env.TELEGRAM_BOT_TOKEN?.trim() || null,
     telegramChatId: env.TELEGRAM_CHAT_ID?.trim() || null,
@@ -216,6 +227,13 @@ function positiveInteger(env: NodeJS.ProcessEnv, name: string, fallback: number)
 function atLeast(env: NodeJS.ProcessEnv, name: string, fallback: number, minimum: number): number {
   const value = positiveInteger(env, name, fallback);
   if (value < minimum) throw new ConfigError(`${name} must be at least ${minimum}, but got ${value}.`);
+  return value;
+}
+
+/** Unset or blank gives the default; a positive integer outside [minimum, maximum] is refused (the run fails). */
+function between(env: NodeJS.ProcessEnv, name: string, fallback: number, minimum: number, maximum: number): number {
+  const value = positiveInteger(env, name, fallback);
+  if (value < minimum || value > maximum) throw new ConfigError(`${name} must be between ${minimum} and ${maximum}, but got ${value}.`);
   return value;
 }
 

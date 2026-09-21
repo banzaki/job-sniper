@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Opportunity } from '../domain/opportunity.js';
 import { donBrunoProfile } from '../profile/don-bruno.js';
+import { translateReason } from '../notify/translate-reasons.js';
 import { makeOpportunity, NOW } from '../testing/fixtures.js';
 import { budgetInUsd } from './budget.js';
 import { mainCaveat } from './engagement-policy.js';
@@ -74,8 +75,8 @@ test('a fixed price or hourly rate under the USD floor is skipped; the original 
   const fixed = evaluate(freelancerProject({ budget: { currency: 'USD', kind: 'fixed', min: 10, max: 40 } }));
   assert.equal(fixed.decision, 'skip');
   assert.equal(fixed.reasons[0], 'fixed budget of about US$40 is below the US$50 floor');
-  assert.equal(evaluate(freelancerProject({ budget: { currency: 'USD', kind: 'fixed', min: 30, max: 250 } })).decision, 'shortlist', 'the top of the range counts');
   assert.equal(evaluate(freelancerProject({ budget: { currency: 'USD', kind: 'fixed', min: 50, max: 50 } })).decision, 'shortlist', 'the floor itself is allowed');
+  assert.equal(evaluate(freelancerProject({ budget: { currency: 'USD', kind: 'fixed', min: 50, max: 200 } })).decision, 'shortlist', 'a bottom that reaches the floor passes');
 
   const hourly = evaluate(freelancerProject({ budget: { currency: 'USD', kind: 'hourly', min: 2, max: 7 } }));
   assert.equal(hourly.decision, 'skip');
@@ -85,6 +86,27 @@ test('a fixed price or hourly rate under the USD floor is skipped; the original 
   const opportunity = freelancerProject({ budget: { currency: 'USD', kind: 'fixed', min: 10, max: 40 } });
   evaluate(opportunity);
   assert.deepEqual(opportunity.budget, { currency: 'USD', kind: 'fixed', min: 10, max: 40 });
+});
+
+test('a range that crosses the floor (bottom under it, top at or over it) is at most a review, never a shortlist', () => {
+  const hourly = evaluate(freelancerProject({ budget: { currency: 'INR', kind: 'hourly', min: 750, max: 1250 }, sourceMetadata: { language: 'en', exchangeRateToUsd: 0.010439 } }));
+  assert.equal(hourly.decision, 'review', 'about US$7.8 to US$13 an hour');
+  assert.ok(hourly.reasons.includes('hourly budget range of about US$7.8 to 13/h crosses the US$8/h floor: at most a review'));
+  assert.match(mainCaveat(hourly.reasons)!, /^hourly budget range of about/);
+
+  const fixed = evaluate(freelancerProject({ budget: { currency: 'USD', kind: 'fixed', min: 30, max: 250 } }));
+  assert.equal(fixed.decision, 'review');
+  assert.ok(fixed.reasons.includes('fixed budget range of about US$30 to 250 crosses the US$50 floor: at most a review'));
+  assert.equal(translateReason(hourly.reasons.find((reason) => reason.includes('budget range'))!), 'faixa de orçamento (cerca de US$7.8 to 13/h) atravessa o mínimo de US$8/h: no máximo revisar');
+
+  assert.equal(evaluate(freelancerProject({ budget: { currency: 'USD', kind: 'fixed', min: 10, max: 49 } })).decision, 'skip', 'a top under the floor is still skipped');
+  assert.equal(evaluate(freelancerProject({ budget: { currency: 'USD', kind: 'fixed', min: 10, max: 50 } })).decision, 'review', 'a top exactly at the floor crosses it');
+  assert.equal(evaluate(freelancerProject({ budget: { currency: 'USD', kind: 'hourly', min: 8, max: 20 } })).decision, 'shortlist', 'a bottom at the floor passes');
+  // A missing bound is open, not zero and not infinite: it cannot skip, and it cannot prove the floor is reached.
+  assert.equal(evaluate(freelancerProject({ budget: { currency: 'USD', kind: 'fixed', min: 10, max: null } })).decision, 'review');
+  assert.equal(evaluate(freelancerProject({ budget: { currency: 'USD', kind: 'fixed', min: 60, max: null } })).decision, 'shortlist');
+  assert.equal(evaluate(freelancerProject({ budget: { currency: 'USD', kind: 'fixed', min: null, max: 90 } })).decision, 'review');
+  assert.equal(evaluate(freelancerProject({ budget: { currency: 'USD', kind: 'fixed', min: null, max: 20 } })).decision, 'skip');
 });
 
 test('another currency is judged by the rate the source published; without one it is at most a review, with no value invented', () => {

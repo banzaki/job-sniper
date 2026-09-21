@@ -51,7 +51,8 @@ const TEAM_ROLE: readonly RegExp[] = [
  *  - a freelance main task that is not technical      -> skip (payroll, story writing... even with a skill tag)
  *  - a freelance main task that is unclear            -> at most review (no technical deliverable in the title or
  *                                                       the start of the description, or title and text disagree)
- *  - a fixed price or hourly rate under the USD floor -> skip
+ *  - a fixed price or hourly rate whose top is under the USD floor -> skip
+ *  - a range that crosses the USD floor (bottom under it, top at or over it) -> at most review
  *  - a budget with no reliable USD conversion         -> at most review (nothing is estimated)
  *  - a project language outside the profile languages -> at most review
  *  - a strong skill that appears only in the skill tags, never in the title or description -> at most review
@@ -90,7 +91,7 @@ export function applyEngagementPolicy(base: FilterResult, opportunity: Opportuni
   const info: string[] = [];
 
   if (mainTask?.verdict === 'unclear') caveats.push(mainTask.reason);
-  if (budget?.verdict === 'unconvertible') caveats.push(budget.reason);
+  if (budget?.verdict === 'unconvertible' || budget?.verdict === 'crosses') caveats.push(budget.reason);
   if (type === 'freelance' && opportunity.proposalCount !== null && opportunity.proposalCount > MAX_PROPOSALS_FOR_SHORTLIST) {
     caveats.push(`crowded project (${opportunity.proposalCount} proposals): at most a review`);
   }
@@ -181,10 +182,11 @@ function judgeMainTask(opportunity: Opportunity, profile: InterestProfile): Judg
   return { verdict: 'unclear', reason: 'technical deliverable is not clear in the title or the start of the description' };
 }
 
-type BudgetJudgement = { verdict: 'ok' } | { verdict: 'skip'; reason: string } | { verdict: 'unconvertible'; reason: string };
+type BudgetJudgement = { verdict: 'ok' } | { verdict: 'skip' | 'crosses' | 'unconvertible'; reason: string };
 
 /**
- * A fixed price or hourly rate whose USD equivalent (the higher end of its range) is under the profile floor is skipped.
+ * The USD equivalent of the range against the profile floor: a top under the floor is skipped, a bottom at or over it
+ * passes, and a range that crosses it (bottom under, top at or over; a missing bound counts as open) is at most a review.
  * A currency with no reliable rate is at most a review: no value is invented. No budget, or one that is neither fixed
  * nor hourly, is not judged.
  */
@@ -196,12 +198,17 @@ function judgeBudget(opportunity: Opportunity, profile: InterestProfile): Budget
   if (usd.status === 'unconvertible') {
     return { verdict: 'unconvertible', reason: usd.currency === '' ? 'budget currency not stated: no reliable USD conversion' : `budget currency "${usd.currency}" has no reliable USD conversion` };
   }
-  const best = Math.max(usd.minUsd ?? 0, usd.maxUsd ?? 0);
-  if (usd.kind === 'fixed' && best < floors.fixedUsd) {
-    return { verdict: 'skip', reason: `fixed budget of about US$${formatUsd(best)} is below the US$${floors.fixedUsd} floor` };
+  const hourly = usd.kind === 'hourly';
+  const floor = hourly ? floors.hourlyUsd : floors.fixedUsd;
+  const unit = hourly ? '/h' : '';
+  const bottom = usd.minUsd ?? 0; // an unknown bottom could be anything
+  const top = usd.maxUsd ?? Number.POSITIVE_INFINITY; // an unknown top could be anything
+  if (top < floor) {
+    return { verdict: 'skip', reason: `${hourly ? 'hourly rate' : 'fixed budget'} of about US$${formatUsd(top)}${unit} is below the US$${floor}${unit} floor` };
   }
-  if (usd.kind === 'hourly' && best < floors.hourlyUsd) {
-    return { verdict: 'skip', reason: `hourly rate of about US$${formatUsd(best)}/h is below the US$${floors.hourlyUsd}/h floor` };
+  if (bottom < floor) {
+    const shown = `${usd.minUsd === null ? '?' : formatUsd(usd.minUsd)} to ${usd.maxUsd === null ? '?' : formatUsd(usd.maxUsd)}`;
+    return { verdict: 'crosses', reason: `${hourly ? 'hourly' : 'fixed'} budget range of about US$${shown}${unit} crosses the US$${floor}${unit} floor: at most a review` };
   }
   return { verdict: 'ok' };
 }
@@ -223,7 +230,7 @@ export function mainCaveat(reasons: readonly string[]): string | null {
     /^crowded project/,
     /^seniority in the title/,
     /^strong skills appear only as tags/,
-    /^budget currency/,
+    /^budget currency|budget range of about/,
     /^conflicting or advanced scope|^only weak signals|^no strong technical signal|^status could not be confirmed|is outside the profile|^broad category/,
   ];
   for (const pattern of order) {

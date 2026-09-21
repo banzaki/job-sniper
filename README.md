@@ -51,8 +51,8 @@ what is already stored. `npm run collect` and `npm run dev` both use this select
   least 6 hours (a stored cooldown; 403 and 429 too, or `Retry-After` if longer). Safe renewal: create a new token in your Freelancer.com
   developer account, replace the value in `.env` yourself (never paste it in chat, commits or screenshots) and run the collection again.
 - Listing: `GET /api/projects/0.1/projects/active/` with `jobs[]` (skill ids), `from_time` (last 7 days), `sort_field=submitdate` (newest
-  first; `reverse_sort=true` would return the OLDEST first), `limit`/`offset` (20 per page, up to 3 pages, further capped by
-  `DISCOVERY_MAX_PAGES`), `full_description` and `job_details`. Skill ids come from `GET /api/projects/0.1/jobs/?job_names[]=...`, looked
+  first; `reverse_sort=true` would return the OLDEST first), `limit`/`offset` (20 per page, `FREELANCER_MAX_PAGES` pages, default 5,
+  range 1 to 10; this setting is read by no other source), `full_description` and `job_details`. Skill ids come from `GET /api/projects/0.1/jobs/?job_names[]=...`, looked
   up from the profile's strong skills and kept 24 hours. Detail: `GET /api/projects/0.1/projects/<id>/`; a project listed in the same run
   is used as it is, an older one is fetched again. The text search parameter (`or_search_query`) did not filter, so skills are filtered by id.
 - Kept: id, title, page URL, real publication instant (Unix time), status (`active` is open), fixed or hourly budget with its **original
@@ -314,10 +314,11 @@ tag rules apply to them. Projects from 99Freelas have no such fields and are eva
   story writing, trading, copywriting, translation, data entry...) is **skipped** even with a skill tag; a title that names non-technical work
   over a technical description, or no clear deliverable at all, is at most `review`. The vocabulary lives in `src/profile/don-bruno.ts`
   (`deliverableSignals`, `offTopicTasks`).
-- **Budget.** The original budget and currency are kept as the source states them. The filter compares an **internal USD equivalent** (the higher
-  end of the range, using the `exchange_rate` the official Freelancer.com API publishes for the currency, saved in
-  `sourceMetadata.exchangeRateToUsd`): a fixed price under **US$50** or an hourly rate under **US$8/h** is **skipped** (defaults in
-  `budgetFloors` of the profile). A currency with no reliable rate is at most `review`; nothing is estimated. The conversion is not shown in Telegram.
+- **Budget.** The original budget and currency are kept as the source states them. The filter compares the range as an **internal USD equivalent** (using the `exchange_rate`
+  the official Freelancer.com API publishes for the currency, saved in `sourceMetadata.exchangeRateToUsd`) with the floors **US$50** (fixed)
+  and **US$8/h** (hourly), defaults in `budgetFloors` of the profile: a **top under the floor is skipped**; a **bottom that reaches it passes**;
+  a range that **crosses** it (bottom under, top at or over; for example US$7.80 to 13/h) is at most `review`. A missing bound is treated as
+  open. A currency with no reliable rate is at most `review`; nothing is estimated. The conversion is not shown in Telegram.
 - **Competition.** Up to 60 proposals may be shortlisted, **61 to 150 are at most `review`**, more than 150 are skipped.
 
 Telegram's "Como a IA pode ajudar" is chosen in this order: bug or error, then API or integration, then WordPress, then front-end, then
@@ -368,6 +369,7 @@ Version 3 adds `discovery_queue`, `deliveries`, `delivery_parts`, `quota_usage`,
 | `DISCOVERY_TARGET_NEW`      | `100`                   | Stop paginating after this many **new** summaries were saved (positive integer, else the run fails) |
 | `SOURCES`                   | `99freelas`             | Sources collected per run: `99freelas`, `remotive`, `freelancer`, comma separated |
 | `FREELANCER_OAUTH_TOKEN`    | —                       | Freelancer.com Personal Access Token (30 days); only the Freelancer source needs it |
+| `FREELANCER_MAX_PAGES`      | `5`                     | Freelancer.com listing pages (20 projects each) per run, 1 to 10 (else the run fails); no other source reads it |
 | `REMOTIVE_MIN_INTERVAL_HOURS` | `6`                   | Hours between Remotive queries, at least 6 (read only when `remotive` is enabled) |
 | `DRY_RUN`                   | `true`                  | `true`: print messages, send nothing, mark nothing. Only an explicit `false` sends |
 | `TELEGRAM_NOTIFY_DECISIONS` | `shortlist,review`      | Which decisions are notified                               |

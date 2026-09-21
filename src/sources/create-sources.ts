@@ -23,8 +23,6 @@ export interface SourceRun {
   disabledReason: string | null;
 }
 
-/** Freelancer.com pages read per run (20 projects each), capped further by DISCOVERY_MAX_PAGES. */
-export const FREELANCER_MAX_PAGES = 3;
 /** Data of these sources may not be used for an alert once it is older than this many hours (API terms: refresh within 24 h). */
 export const SOURCE_DATA_MAX_AGE_HOURS: Readonly<Record<string, number>> = { freelancer: 24 };
 
@@ -52,7 +50,8 @@ export function createSourceRuns(config: AppConfig, store: OpportunityStore, pro
         };
       }
       const client = new FreelancerClient(config.freelancerToken);
-      const pages = Math.min(config.discoveryMaxPages, FREELANCER_MAX_PAGES);
+      // Freelancer.com has its own depth (FREELANCER_MAX_PAGES); DISCOVERY_MAX_PAGES belongs to 99Freelas.
+      const pages = config.freelancerMaxPages;
       return {
         name,
         label: 'Freelancer.com',
