@@ -311,8 +311,9 @@ later day (while its data is fresh). Overflow and backlog are never drained by t
 | Manual real delivery | `npm run notify:manual -- --only <source>:<id> [--send]` | ignored (the only rule it ignores) | yes, after Telegram confirms | no: an opportunity already delivered is refused |
 
 - **Exactly one** `<source>:<id>` per command (for example `freelancer:40725242`). A list, a repeated `--only`, `all` or any implicit batch is refused.
-- **Without `--send`** both only print the message: nothing is sent, stored or marked. `--send` is the owner's explicit request and does not depend on
-  `DRY_RUN`, but the Telegram credentials are still required (their absence is reported by variable name).
+- **Without `--send`** both only print the message: nothing is sent, stored or marked. A real send needs all three of: an explicit `--send`, `DRY_RUN=false`
+  and valid Telegram credentials (their absence is reported by variable name). With `--send` and `DRY_RUN=true` the command fails at once with
+  "Envio bloqueado: DRY_RUN=true. Defina DRY_RUN=false para autorizar envio real.", before touching Telegram or the database.
 - **Preview** carries the mandatory header "🧪 PRÉVIA MANUAL", is stored as a delivery of kind `demo` with a unique reference, never touches `notified_at`,
   the alert queue or a production delivery, and never calls the AI. It can show any stored opportunity, delivered or not (a preview of data older than the
   source's limit only prints a warning; nothing else uses that data).

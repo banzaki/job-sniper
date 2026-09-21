@@ -3,7 +3,7 @@ import { loadAppConfig } from '../config.js';
 import { createNotifier } from '../notify/create-notifier.js';
 import { describeDailyAllowance } from '../notify/daily-limit.js';
 import { deliverManual } from '../notify/manual.js';
-import { parseManualArgs } from '../notify/manual-args.js';
+import { assertSendAllowed, parseManualArgs } from '../notify/manual-args.js';
 import { SOURCE_LABELS } from '../notify/source-labels.js';
 import { brunoCandidate } from '../profile/bruno-candidate.js';
 import { SOURCE_DATA_MAX_AGE_HOURS } from '../sources/create-sources.js';
@@ -20,7 +20,8 @@ const USAGE = 'Usage: npm run notify:manual -- --only <source>:<id> [--send]';
 async function main(): Promise<number> {
   const { key, send } = parseManualArgs(process.argv.slice(2), USAGE);
   const config = loadAppConfig();
-  // --send is the owner's explicit request: it does not depend on DRY_RUN, but Telegram credentials are still required.
+  // A real send needs --send, DRY_RUN=false and valid credentials. With DRY_RUN=true it fails here, before the database or Telegram is touched.
+  assertSendAllowed(send, config.dryRun);
   const notifier = createNotifier({ ...config, dryRun: !send });
   const store = new OpportunityStore(config.databasePath);
   try {

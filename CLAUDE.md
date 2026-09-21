@@ -75,7 +75,7 @@ terminal reports stay in English.
 - `npm run dev` — run with tsx (collect, AI if enabled, notify)
 - `npm run collect` — discovery and details only
 - `npm run notify:demo -- --id <id>` — one demonstration delivery of a saved analysis
-- `npm run notify:preview -- --only <source>:<id> [--send]` — a "🧪 PRÉVIA MANUAL" of exactly one stored opportunity; repeatable; touches no flag, queue or production delivery
+- `npm run notify:preview -- --only <source>:<id> [--send]` — a "🧪 PRÉVIA MANUAL" of exactly one stored opportunity; repeatable; touches no flag, queue or production delivery. `--send` needs `DRY_RUN=false` (also for `notify:manual`)
 - `npm run notify:manual -- --only <source>:<id> [--send]` — the real delivery of exactly one never-delivered opportunity, ignoring only the automatic daily limit
 - `npm run typecheck` — type-check
 - `npm run build` — compile to `dist/`

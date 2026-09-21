@@ -1,4 +1,10 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import type { FilterDecision, FilterResult } from '../domain/filter-result.js';
 import type { OpportunityKey } from '../domain/opportunity.js';
@@ -7,7 +13,7 @@ import { OpportunityStore } from '../storage/opportunity-store.js';
 import { makeOpportunity } from '../testing/fixtures.js';
 import { dailyAllowance } from './daily-limit.js';
 import { deliverManual, previewManual } from './manual.js';
-import { parseManualArgs } from './manual-args.js';
+import { assertSendAllowed, parseManualArgs, SEND_BLOCKED_MESSAGE } from './manual-args.js';
 import type { Notifier } from './notifier.js';
 import { notifyPending } from './notify-pending.js';
 import { SOURCE_LABELS } from './source-labels.js';
@@ -250,3 +256,56 @@ test('the automatic path still obeys the daily limit, counting only its own aler
   const third = await notifyPending({ store, notifier: sink.notifier, decisions: ALL, dryRun: false, format: { sourceLabels: SOURCE_LABELS, now: NOW }, now: () => NOW, maxAlerts: 5, maxAlertsPerDay: 10, alertKeys: batch.alertKeys });
   assert.equal(third.sent, 0, 'the day is full for automatic alerts');
 });
+
+// ---------- DRY_RUN=true blocks every external send ----------
+const REPO = fileURLToPath(new URL('../../', import.meta.url));
+
+test('--send with DRY_RUN=true is blocked with a clear message; --send with DRY_RUN=false passes the guard', () => {
+  assert.throws(() => assertSendAllowed(true, true), (error: unknown) => error instanceof Error && error.message === SEND_BLOCKED_MESSAGE);
+  assert.equal(SEND_BLOCKED_MESSAGE, 'Envio bloqueado: DRY_RUN=true. Defina DRY_RUN=false para autorizar envio real.');
+  assert.doesNotThrow(() => assertSendAllowed(true, false), '--send + DRY_RUN=false is allowed (credentials are checked next)');
+  assert.doesNotThrow(() => assertSendAllowed(false, true), 'without --send nothing is sent, so DRY_RUN is irrelevant');
+  assert.doesNotThrow(() => assertSendAllowed(false, false));
+});
+
+/** Runs a real CLI in a child process against its own database, with DRY_RUN set explicitly and no Telegram credentials. */
+function runCli(script: string, args: string[], dbPath: string, dryRun: string) {
+  const env: NodeJS.ProcessEnv = { ...process.env, DATABASE_PATH: dbPath, DRY_RUN: dryRun, TELEGRAM_BOT_TOKEN: '', TELEGRAM_CHAT_ID: '', GEMINI_API_KEY: '', AI_ENABLED: 'false' };
+  return spawnSync(process.execPath, ['--import', 'tsx', `src/cli/${script}.ts`, ...args], { cwd: REPO, env, encoding: 'utf8' });
+}
+
+for (const script of ['notify-preview', 'notify-manual']) {
+  test(`${script} --send with DRY_RUN=true fails before Telegram and leaves the database byte-for-byte unchanged`, () => {
+    const dir = mkdtempSync(join(tmpdir(), 'job-sniper-dry-'));
+    try {
+      const dbPath = join(dir, 'guard.db');
+      const store = new OpportunityStore(dbPath);
+      const key = add(store);
+      store.close();
+      const before = createHash('sha256').update(readFileSync(dbPath)).digest('hex');
+      const id = `${key.sourceId}:${key.externalId}`;
+
+      const blocked = runCli(script, ['--only', id, '--send'], dbPath, 'true');
+      assert.equal(blocked.status, 1, blocked.stdout + blocked.stderr);
+      assert.ok(blocked.stderr.includes('Envio bloqueado: DRY_RUN=true. Defina DRY_RUN=false para autorizar envio real.'), blocked.stderr);
+      assert.ok(!/Telegram|credentials|Missing/i.test(blocked.stdout + blocked.stderr.replace(/Envio bloqueado[^\n]*/, '')), 'it failed on DRY_RUN, not on credentials or a Telegram call');
+      assert.equal(createHash('sha256').update(readFileSync(dbPath)).digest('hex'), before, 'the database file was not touched');
+
+      // Without --send it only renders, whatever DRY_RUN says, and still marks nothing.
+      for (const dryRun of ['true', 'false']) {
+        const rendered = runCli(script, ['--only', id], dbPath, dryRun);
+        assert.equal(rendered.status, 0, rendered.stdout + rendered.stderr);
+        assert.ok(rendered.stdout.includes('Nothing was sent, stored or marked.'));
+        if (script === 'notify-preview') assert.ok(rendered.stdout.includes('🧪 PRÉVIA MANUAL'));
+      }
+      const reopened = new OpportunityStore(dbPath);
+      assert.equal(reopened.get(key)?.notifiedAt, null, 'notified_at untouched');
+      assert.deepEqual(reopened.alertQueue.counts(), { selected: 0, overflow: 0, expired: 0 }, 'the queue is untouched');
+      const usage = dailyAllowance(reopened, new Date(), 10);
+      assert.equal(usage.manualPreviews + usage.manualDeliveries + usage.automaticToday, 0, 'no counter moved');
+      reopened.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+}

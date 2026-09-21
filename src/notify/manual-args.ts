@@ -6,6 +6,18 @@ export interface ManualArgs {
   send: boolean;
 }
 
+/** What the owner sees when --send meets DRY_RUN=true. */
+export const SEND_BLOCKED_MESSAGE = 'Envio bloqueado: DRY_RUN=true. Defina DRY_RUN=false para autorizar envio real.';
+
+/**
+ * A real send needs three things together: an explicit --send, DRY_RUN=false and valid credentials (checked when the notifier is created).
+ * DRY_RUN=true blocks every external send, these two manual commands included. Called BEFORE the database or Telegram is touched, so a
+ * blocked send changes nothing. Without --send nothing is ever sent, whatever DRY_RUN says.
+ */
+export function assertSendAllowed(send: boolean, dryRun: boolean): void {
+  if (send && dryRun) throw new Error(SEND_BLOCKED_MESSAGE);
+}
+
 /** Words that would mean "everything": a manual command never accepts them. */
 const BATCH_WORDS = new Set(['all', 'todos', 'todas', '*', 'batch', 'backlog']);
 
