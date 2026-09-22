@@ -1,7 +1,7 @@
 {
   "version": 1,
   "agents": {
-    "job-sniper": {
+    "job-sniper-hunter": {
       "security": "allowlist",
       "ask": "on-miss",
       "allowlist": [

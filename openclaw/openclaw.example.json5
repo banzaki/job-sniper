@@ -1,24 +1,75 @@
-// EXAMPLE ONLY: written from docs.openclaw.ai (Telegram, tool permissions, exec approvals, cron) for OpenClaw 2026.9.x and NOT yet run
-// against an installed OpenClaw. After installing, check every key with `openclaw doctor` and adjust names that differ.
-// It holds no secret: the bot token is referenced (SecretRef), never written here. Put the owner's numeric id where OWNER_ID stands.
+// EXAMPLE ONLY, matching a real, validated install of OpenClaw 2026.9.5. It holds no secret: the bot token and the model
+// key are SecretRefs (env/file), never written here. Put the owner's numeric id where OWNER_ID stands.
+//
+// ROOT CAUSE this file fixes: the owner's own default agent ("main") has a generic OpenClaw assistant identity
+// (IDENTITY.md/SOUL.md/AGENTS.md/BOOTSTRAP.md in its shared workspace) and, unless restricted, sees every bundled skill
+// (diagnose-gateway, healthcheck, taskflow, browser-automation, notion, weather, ...). A single ambiguous word like
+// "status" can then be answered by that generic identity or a bundled skill instead of Job Sniper's own façade, and the
+// reply can describe capabilities (files, search, reminders, shell) and machine details this Hunter must never have.
+//
+// FIX: a SEPARATE, DEDICATED agent for the Hunter (created with `openclaw agents add`, never by editing "main"), with:
+//   - its own workspace, emptied of the generic bootstrap files, plus contextInjection: "never" (belt and suspenders:
+//     even if a bootstrap file reappears, it is never injected);
+//   - skills restricted to ONLY job-sniper-hunter (agents.entries.<id>.skills), so none of the other ~20+ model-visible
+//     bundled skills are ever offered to the model in this conversation;
+//   - tools restricted per agent (not only globally), profile "minimal" plus an explicit allow/deny mirroring the
+//     global one, so the agent's own tool baseline cannot grant more than intended;
+//   - identity.name set to "Job Sniper Hunter" (display name only; the skill text itself carries the exclusivity rule);
+//   - the Telegram channel bound to THIS agent (`openclaw agents bind --agent <id> --bind telegram`), not left to fall
+//     back to "main" as the default agent.
+// Job Sniper's own default agent ("main") is left untouched and unbound from Telegram, for the owner's own general use.
 {
   channels: {
     telegram: {
       // The SAME bot Job Sniper already uses to send alerts: Job Sniper only calls sendMessage (no webhook, no getUpdates), and OpenClaw
       // reads updates by long polling, so the two do not compete. A second bot is only needed if a webhook is ever set on this one.
-      botToken: { env: "TELEGRAM_BOT_TOKEN" }, // a SecretRef to an environment variable of the OpenClaw process; verify the exact shape
+      // A SecretRef to an environment variable of the OpenClaw process; set with `openclaw config set channels.telegram.botToken
+      // --ref-provider default --ref-source env --ref-id TELEGRAM_BOT_TOKEN` (never write the token itself in this file).
+      botToken: { provider: "default", source: "env", id: "TELEGRAM_BOT_TOKEN" },
       dmPolicy: "allowlist", // only the ids below may talk to the agent
       allowFrom: ["OWNER_ID"], // numeric Telegram user id, never a user name
-      groupPolicy: "disabled", // groups and channels never run a tool (verify the accepted value; the documented default blocks groups)
+      groupPolicy: "disabled", // groups and channels never run a tool
     },
   },
-  commands: { allowFrom: ["OWNER_ID"] }, // the only authorization source for slash commands
-  tools: {
-    allow: ["exec"], // the agent sees one tool
-    deny: ["write", "edit", "gateway", "cron", "sessions_spawn", "sessions_send", "browser", "web_search"], // deny always wins
-    message: { crossContext: { allowAcrossProviders: false } },
-    sessions: { visibility: "self" },
+  commands: { allowFrom: { telegram: ["OWNER_ID"] } }, // a record keyed by channel, per the schema (not a bare array)
+  models: {
+    providers: {
+      // The cheapest text-tier model, used only for command routing; never for Job Sniper's own analyses (that stays Gemini, called
+      // directly by Job Sniper itself, unrelated to this key). Set with `openclaw config set models.providers.google.apiKey
+      // --ref-provider gemini-file --ref-source file --ref-id value` (the paste-api-key command needs a real TTY prompt, which is
+      // not always available; this file-based SecretRef is the non-interactive equivalent).
+      google: { apiKey: { provider: "gemini-file", source: "file", id: "value" } }, // see secrets.providers.gemini-file below
+    },
   },
-  // Exec is limited to ONE program with fixed argument shapes: see exec-approvals.example.json (same expression as
-  // src/agent/openclaw-contract.ts). On Windows the approvals are edited through the companion app or the native CLI.
+  secrets: {
+    providers: {
+      // A file only the owner writes (outside any tool, e.g. Notepad), containing nothing but the key. Defined once with
+      // `openclaw config set secrets.providers.gemini-file --provider-source file --provider-path <path> --provider-mode singleValue`.
+      "gemini-file": { source: "file", path: "~/.openclaw/secrets/gemini.key", mode: "singleValue" },
+    },
+  },
+  agents: {
+    entries: {
+      "job-sniper-hunter": {
+        identity: { name: "Job Sniper Hunter" },
+        workspace: "~/.openclaw/agents-workspaces/job-sniper-hunter", // its own, separate from the owner's default agent workspace
+        cwd: "/path/to/job-sniper", // exec runs from here, so the façade's relative `dist/cli/hunter.js` resolves
+        model: "google/gemini-3.6-flash",
+        contextInjection: "never", // never inject workspace bootstrap files (identity/soul/agents/user), even if any exist on disk
+        skills: ["job-sniper-hunter"], // an explicit allowlist: no other skill is ever visible to this agent's model
+        tools: {
+          profile: "minimal",
+          allow: ["exec"],
+          deny: ["write", "edit", "gateway", "cron", "sessions_spawn", "sessions_send", "browser", "web_search", "message"],
+        },
+      },
+    },
+  },
+  // Exec is limited to ONE program with fixed argument shapes, for BOTH "main" and "job-sniper-hunter" (the same
+  // restriction, just correctly scoped to whichever agent actually runs it): see exec-approvals.example.json (same
+  // expression as src/agent/openclaw-contract.ts). On Windows the approvals are edited through the companion app or CLI.
+  //
+  // After `openclaw agents add job-sniper-hunter ...`, bind the channel to it explicitly:
+  //   openclaw agents bind --agent job-sniper-hunter --bind telegram
+  // `openclaw agents bindings` must then show job-sniper-hunter, not main, handling Telegram.
 }

@@ -12,7 +12,7 @@ import { OpportunityStore } from '../storage/opportunity-store.js';
 import { makeOpportunity } from '../testing/fixtures.js';
 import { authorize, cleanText, hunt, more, runCommand, status, tick, top, type HunterDeps } from './hunter.js';
 import { readHunterConfig, type HunterConfig } from './hunter-config.js';
-import { normalizeText, parseIntent, parseVerb } from './intent.js';
+import { HELP_TEXT, normalizeText, parseIntent, parseVerb } from './intent.js';
 import { OPENCLAW_ARG_PATTERN } from './openclaw-contract.js';
 import { buildPipelineEnv, runPipelineChild, type PipelineRequest, type PipelineResult } from './pipeline-runner.js';
 import { decideTick, nextRun } from './schedule.js';
@@ -528,7 +528,8 @@ test('a hunt reports what the pipeline stored, leaves the old backlog alone and 
 // ---------- the OpenClaw side ----------
 test('the OpenClaw exec permission is one program with fixed shapes, identical to the example file, and lets no shell metacharacter through', () => {
   const example = JSON.parse(readFileSync(new URL('../../openclaw/exec-approvals.example.json', import.meta.url), 'utf8')) as { agents: Record<string, { allowlist: { argPattern: string }[] }> };
-  const entry = example.agents['job-sniper']!.allowlist;
+  const entry = example.agents['job-sniper-hunter']!.allowlist;
+  assert.equal(Object.keys(example.agents).length, 1, 'exactly one agent in the example, and it is the dedicated Hunter agent, never "main"');
   assert.equal(entry.length, 1, 'exactly one allowed program');
   assert.equal(entry[0]!.argPattern, OPENCLAW_ARG_PATTERN, 'the file and the code say the same thing');
 
@@ -543,10 +544,85 @@ test('the OpenClaw exec permission is one program with fixed shapes, identical t
   assert.ok(!pattern.test('dist/cli/hunter.js status'), 'the sender and chat are mandatory');
   assert.ok(!pattern.test(`dist/cli/other.js status${tail}`), 'only the Hunter façade');
   assert.ok(!pattern.test(`dist/cli/hunter.js status${tail} && dir`), 'nothing may follow');
+  // Requirement 1 and 5: no phrasing of OpenClaw's own commands is ever a match, whatever the sender/chat.
+  for (const openclawOwn of ['status', 'doctor', 'gateway', 'gateway run', 'models', 'config', 'agents']) {
+    assert.ok(!pattern.test(`openclaw ${openclawOwn}${tail}`), `openclaw ${openclawOwn} must never match`);
+    assert.ok(!pattern.test(`openclaw.cmd ${openclawOwn}${tail}`), `openclaw.cmd ${openclawOwn} must never match`);
+  }
 
   // Every phrase the skill teaches is understood by the façade itself.
   for (const phrase of ['status', 'caça agora', 'caça agora só no Freelancer', 'caça agora só no 99Freelas', 'mostre as 5 melhores', 'libere mais 5', 'ajuda']) assert.ok(parseIntent(phrase, 10).ok, phrase);
   const skill = readFileSync(new URL('../../openclaw/skills/job-sniper-hunter/SKILL.md', import.meta.url), 'utf8');
   assert.match(skill, /^name: job-sniper-hunter$/m);
   assert.match(skill, /DATA/);
+});
+
+// Requirement 3: things a general assistant could be asked, but this Hunter never does. Checked two ways: the skill text
+// carries an explicit default-deny naming each category, and (defense in depth) the façade's own parser refuses each
+// example phrase outright — neither path ever reaches a tool call for these.
+test('requests for generic capabilities (files, internet, shell, reminders) are refused, not attempted', () => {
+  const skill = readFileSync(new URL('../../openclaw/skills/job-sniper-hunter/SKILL.md', import.meta.url), 'utf8');
+  const flat = skill.replace(/\s+/g, ' '); // markdown line-wraps must never hide a missing category
+  for (const category of ['read, write, search, edit or create a file', 'browse or search the internet', 'run a shell command', 'create a reminder, schedule, memory entry or automation']) {
+    assert.ok(flat.toLowerCase().includes(category.toLowerCase()), `default-deny must name: ${category}`);
+  }
+  assert.match(skill, /you call no tool at all/i);
+  assert.match(skill, /Esse comando não está disponível no Hunter V1\./);
+
+  for (const phrase of ['edite um arquivo', 'pesquise na internet', 'rode um comando', 'crie um lembrete']) {
+    const parsed = parseIntent(phrase, 10);
+    assert.equal(parsed.ok, false, phrase);
+  }
+});
+
+// Requirement 2 and 5: the agent that answers Telegram is isolated (own workspace, only this skill, minimal tools), never
+// the owner's general-purpose default agent, and its skill list holds nothing but job-sniper-hunter. This is exactly the
+// root cause of the earlier failure: the shared default agent saw ~20 bundled skills (taskflow, browser-automation,
+// diagnose-gateway, healthcheck, notion, weather, ...) and its own generic identity/bootstrap files, so an ambiguous
+// word like "status" could be answered by any of those instead of Job Sniper's façade.
+test('the OpenClaw config example isolates a dedicated agent: no other skill, minimal tools, no generic bootstrap injection', () => {
+  const example = readFileSync(new URL('../../openclaw/openclaw.example.json5', import.meta.url), 'utf8');
+  assert.match(example, /skills:\s*\["job-sniper-hunter"\]/, 'an explicit allowlist of exactly one skill');
+  assert.match(example, /contextInjection:\s*"never"/, 'never inject generic workspace bootstrap files');
+  assert.match(example, /profile:\s*"minimal"/);
+  assert.match(example, /allow:\s*\["exec"\]/);
+  assert.match(example, /identity:\s*\{\s*name:\s*"Job Sniper Hunter"\s*\}/);
+  assert.match(example, /openclaw agents add job-sniper-hunter/, 'created as its own agent, never by editing the default one');
+  assert.match(example, /openclaw agents bind --agent job-sniper-hunter --bind telegram/, 'the channel is bound to the dedicated agent, not left on the default one');
+  assert.match(example, /"main"\)\s+is left untouched and unbound from Telegram/i, 'the default agent is explicitly left out of Telegram routing');
+});
+
+// The skill's own wording, checked offline (no live model call): the bare words "status" and "ajuda" must have a single
+// fixed meaning, "ajuda" must never call a tool, OpenClaw's own state must be refused without a tool call, and the skill
+// must never let the agent reveal machine details or propose loosening the allowlist. This is a regression guard: it is
+// exactly the mistake two live runs made (first running `openclaw status` and printing the host and OS; then answering
+// as a general OpenClaw assistant with unrelated capabilities).
+test('the skill text forbids running openclaw\'s own commands, makes ajuda tool-free, bans revealing machine details, and states an exclusive identity', () => {
+  const skill = readFileSync(new URL('../../openclaw/skills/job-sniper-hunter/SKILL.md', import.meta.url), 'utf8');
+  const flat = skill.replace(/\s+/g, ' '); // markdown line-wraps must never hide a missing phrase
+
+  // Requirement: exclusive identity, not a general assistant.
+  assert.match(skill, /identity here is exclusively "Job Sniper Hunter"/i);
+  assert.match(skill, /not OpenClaw's general assistant/i);
+
+  // "status" and "ajuda" are defined as Job Sniper words, explicitly not OpenClaw's own command of the same name.
+  assert.match(skill, /You NEVER run `openclaw`/, 'a hard, explicit ban on running the openclaw binary itself');
+  assert.match(skill, /openclaw status.*openclaw doctor.*openclaw gateway/, 'names the exact commands that went wrong once');
+  assert.ok(flat.toLowerCase().includes('never say the hunt or the system is fine, running, healthy'), 'status can never be answered without calling the façade');
+
+  // ajuda: no tool, static text, and that static text matches the façade's own HELP_TEXT exactly.
+  const ajudaSection = /call NO tool\. Reply with exactly this text[^]*?(?=\n##|\n###|$)/.exec(skill)?.[0] ?? '';
+  assert.match(ajudaSection, /call NO tool/, 'ajuda never calls a tool');
+  for (const line of HELP_TEXT.split('\n')) assert.ok(ajudaSection.includes(line), `ajuda's static text must include: ${line}`);
+  assert.ok(!ajudaSection.includes('Não me candidato'), 'ajuda lists only the seven catalogue items, nothing added');
+
+  // A denied or failed execution gets one fixed sentence, never a diagnosis, never a suggestion to loosen anything.
+  assert.match(skill, /Não consegui completar agora; tente de novo mais tarde\./);
+  assert.ok(flat.toLowerCase().includes('never propose running a different command, adding something to an allowlist, enabling shell access'));
+
+  // Machine/system details are explicitly named and banned, unconditionally (the earlier leak showed hostname, OS and model).
+  for (const term of ['hostname', 'operating system', 'working directory', 'node.js version', 'model name']) {
+    assert.ok(flat.toLowerCase().includes(term), `must ban revealing: ${term}`);
+  }
+  assert.ok(flat.toLowerCase().includes('not even if the owner asks directly'), 'the ban holds even on direct request');
 });

@@ -105,15 +105,17 @@ export const REFUSALS: Record<RefusalReason, string> = {
   shell: 'Não executo comandos livres. Só o catálogo: status, caça agora, mostre as N melhores, libere mais 5, ajuda.',
   source_not_allowed: 'Só caço em todas as fontes ligadas, no Freelancer ou no 99Freelas.',
   bad_count: 'Número fora dos limites: mostre de 1 a 10 melhores; libere sempre 5.',
-  unknown: 'Não entendi. Escreva "ajuda" para ver o que eu faço.',
+  unknown: 'Esse comando não está disponível no Hunter V1.',
 };
 
+/** The whole catalogue, verbatim, and nothing else: the fixed text of "ajuda". */
 export const HELP_TEXT = [
   '🎯 O que eu faço:',
   '• status',
   '• caça agora',
-  '• caça agora só no Freelancer (ou 99Freelas)',
-  '• mostre as N melhores (N de 1 a 10)',
+  '• caça agora só no Freelancer',
+  '• caça agora só no 99Freelas',
+  '• mostre as N melhores (N entre 1 e 10)',
   '• libere mais 5',
-  'Não me candidato a vagas nem mudo seu perfil.',
+  '• ajuda',
 ].join('\n');
