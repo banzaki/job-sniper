@@ -280,7 +280,10 @@ for (const script of ['notify-preview', 'notify-manual']) {
     try {
       const dbPath = join(dir, 'guard.db');
       const store = new OpportunityStore(dbPath);
-      const key = add(store);
+      // These CLI subprocesses use the real wall clock. Keep the fixture fresh
+      // so this guard test does not fail for unrelated source-age policy.
+      const fresh = new Date().toISOString();
+      const key = add(store, 'shortlist', { publishedAt: fresh, fetchedAt: fresh });
       store.close();
       const before = createHash('sha256').update(readFileSync(dbPath)).digest('hex');
       const id = `${key.sourceId}:${key.externalId}`;
